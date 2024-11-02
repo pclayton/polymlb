@@ -1,0 +1,107 @@
+PolyMLB
+=======
+
+PolyMLB is a complete implementation of the ML Basis system for Poly/ML.
+Although primarily implemented as a library, it also offers an executable
+wrapper (polymlb) for regular usage.
+
+
+## Building and installing
+
+Building requires Poly/ML and its accompanying script polyc.
+
+    $ make all
+
+Installing polymlb as well as the Standard ML library files:
+
+    $ make install
+
+Note that the default location for Standard ML libraries is set when building;
+its value is that of `SML_LIB`, which defaults to `$(LIBDIR)/polymlb`.
+
+
+## Usage
+
+This only covers simple polymlb usage. More detailed information is available
+in the `polymlb(1)` man page. For the library, see LIBRARY.
+
+The following compiles and links `t.mlb`, producing an executable `t`:
+
+    $ polymlb t.mlb
+
+polymlb operates on MLB files only and exits if the given file does not have
+the `.mlb` extension. The given MLB file is compiled and exported to an object
+file, which is then linked to the polyml library by invoking polyc. Although
+the default behavior is to export a function called `main`, a different name
+may be provided and will be used as root and entry point if it is of the correct
+type (`unit -> unit`).
+
+polymlb options include:
+
+- `-ignore-call-main`: ignore files called `call-main.sml`;
+- `-ignore-main`: ignore files called `main.sml`;
+- `-jobs <n>`: maximum number of jobs;
+- `-main <id>`: root function to export;
+- `-mlb-path-map <file>`: additional MLB path map;
+- `-mlb-path-var '<name> <value>'`: additional MLB path var;
+- `-o`, `-output`: name of the output file;
+- `-polyc <polyc>`: polyc executable;
+- `-sml-lib`: print the resolved value of `SML_LIB`.
+
+
+## ML Basis
+
+If the libraries were correctly installed, then the following are available:
+
+- `$(SML_LIB)/basis/basis.mlb`: the Standard ML Basis library as implemented by
+  Poly/ML;
+- `$(SML_LIB)/basis/poly.mlb`: the Poly/ML library extensions, such as the
+  `PolyML` or the `Thread` structures;
+- `$(SML_LIB)/polymlb/polymlb.mlb`: the PolyMLB library.
+
+PolyMLB implements several annotations:
+
+- `debug {true|false}`: whether debugging information should be included in the
+  compiled code;
+- `discard`: enclosed declarations are completely ignored;
+- `ignoreFiles file1,file2,...`: files with a matching basename are ignored.
+
+An optional `poly:` prefix is recognized; others (e.g `mlton:`) will cause the
+annotation to be ignored.
+
+Do note that annotations do not affect imported MLB files; i.e the following
+does not work:
+
+    $ cat a.mlb
+    main.sml
+    $ cat b.mlb
+    ann
+      "ignoreFiles main.sml"
+    in
+      a.mlb
+    end
+
+As for path variables, only `SML_LIB` is initially defined.
+
+
+## License
+
+BSD 2-clause
+
+
+## References
+
+Poly/ML:
+
+- https://polyml.org
+- https://polyml.org/documentation/Reference/Basis.html
+- https://github.com/polyml/polyml
+
+ML Basis:
+
+- http://mlton.org/MLBasis
+- http://mlton.org/MLBasis.attachments/mlb-formal.pdf
+
+Standard ML Basis Library:
+
+- https://smlfamily.github.io/Basis/

@@ -1,0 +1,60 @@
+#!/usr/bin/env sh
+
+check() {
+	if [ -z $(command -v "$1") ]; then
+		echo "$2"
+		exit 1
+	fi
+}
+
+one() {
+	[ -e "$1" ] || return
+
+	. ./"$1"
+	t=${1%.t}
+	REPO=r/"$t"
+
+	if [ ! -e "$REPO" ]; then
+		check git "git not found"
+		git clone --depth 1 "$url" "$REPO"
+
+		if [ -n "$smlpkg" ]; then
+			check smlpkg "smlpkg not found"
+			cd "$REPO"
+			smlpkg sync
+			cd "$OLDPWD"
+		fi
+
+		if [ -e "$t".patch ]; then
+			cd "$REPO"
+			git apply "../../$t".patch
+			cd "$OLDPWD"
+		fi
+	fi
+
+	if [ "$CMD" = build ]; then
+		build
+	fi
+}
+
+case $1 in
+clean)
+	rm -rf r/
+	exit ;;
+init)
+	CMD=init
+	shift ;;
+*)
+	check "$POLYMLB" "polymlb not found"
+	CMD=build ;;
+esac
+
+if [ "$#" -eq 0 ]; then
+	ts=*.t
+else
+	ts="$@"
+fi
+
+for t in $ts; do
+	one "$t"
+done

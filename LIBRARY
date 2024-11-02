@@ -1,0 +1,244 @@
+PolyMLB
+=======
+
+## Simple usage
+
+The PolyMLB library's main API is the `PolyMLB` structure, which offers the
+following functions:
+
+- `compile`: compile an ML Basis file and return the resulting namespace;
+- `import`: compile an ML Basis file and import it into the global namespace;
+- `use`: like import but with signature and behavior similar to the top level
+  function `use`.
+
+The behavior of both `compile` and `import` can be customized through the passed
+in options and return an `Ok | Error` value. On the other hand, `use` does not
+take in options and has type `string -> unit`; in case of error, it prints the
+error to stdout and raises an exception.
+
+The library can be iomport by calling `use` with the `build.sml` file in
+`src/lib`, though SML_LIB is not set by default. Once it has been successfully
+compiled, MLB based libraries may be imported by making use of the above
+functions. Default path variables are stored in the `PolyML.pathMap` map, which
+is publicly accessible and modifiable.
+
+    > PolyML.use "path/to/polymlb/sources/build.sml";
+    > HashArray.update (PolyMLB.pathMap, "SML_LIB", "path/to/libraries");
+    > PolyMLB.use "path/to/lib.mlb";
+
+If PolyMLB was installed through `make install`, then it is available at
+`$SML_LIB/polymlb`. As an example, the following can be used to start a
+Poly/ML REPL with PolyMLB:
+
+    $ SML_LIB=$(polymlb -sml-lib)
+    $ poly -i --eval \
+    "PolyML.use \"$SML_LIB/polymlb/build.sml\";
+    HashArray.update (PolyMLB.pathMap, \"SML_LIB\", \"$SML_LIB\");"
+
+The lower level components are included in the PolyMLB structure for convenience
+and "just in case" but are not stable and must be used with care in order to
+avoid catastrophic failure.
+
+
+## Implementation overview
+
+The library is mostly designed as a pipeline where each stage trusts that the
+data is valid in regards to its predecessors; thus general error policy is to
+simply raise an exception and let it propagate. The PolyMLB structure is in fact
+only glue code for the different components with some error handling.
+
+The exposed inner modules are as follows:
+
+- Lex, mlb lexing utilies;
+- Parse, mlb parsing;
+- Path, path validation;
+- Ann, annotations utilites;
+- Basis, mlb validation and conversion from parse results;
+- Dag, mlb graph processing and validation;
+- NameSpace, result of mlb compilation;
+- Compile, mlb compilation.
+
+By design, compilation only happens if everything was successfully validated,
+i.e after every mlb file has been parsed and checked. As a consequence, the
+Compile module expects that there is no missing dependency and also does not
+check for cycles, in which case the result of a compilation is undefined
+(pick one of infinite recursion, deadlock or incorrect compilation).
+
+Compilation works with namespaces (`NameSpace.t`), which are representations
+of a 'basis' as described in [1]:
+
+> [A] basis is a collection, but of more kinds of objects: types, values,
+> structures, fixities, signatures, functors, and other bases.
+
+The concrete implementation is simply a `PolyML.NameSpace.nameSpace` [2]
+augmented with similar operations for bases (i.e operating on `NameSpace.t`).
+Compiling an MLB file thus returns a namespace which contains its public exposed
+symbols.
+
+[1]: http://mlton.org/MLBasisSyntaxAndSemantics
+[2]: https://polyml.org/documentation/Reference/PolyMLNameSpace.html
+
+
+## Details
+
+### Builtin libraries
+
+Due to the Basis library and the Poly/ML extensions being baked in the compiler,
+support for these is hacked in with prefilled namespaces derived from the global
+namespace and a hardcoded list of structure and signature names from Poly/ML
+extensions. In order to avoid special casing every module to check whether paths
+refer to either of these libraries, valid mlb files are provided, although they
+only contain an open directive for the corresponding namespace.
+
+Since elaboration starts in an empty environment, these namespaces are at first
+not available. A special `poly:importAll` annotation is used, which has the
+effect of making the entirety of the global namespace available to its enclosed
+declarations. Thus the SML Basis mlb is simply:
+
+    ann
+      "poly:importAll"
+    in
+      open BasisLib
+    end
+
+### Elaboration order
+
+Each mlb file is elaborated only once and its resulting namespace reused when
+referenced again. On the other hand, SML source files are compilated everytime
+they are referenced, even in the same mlb file. When exactly an mlb file is
+compiled depends on the options passed to the Compile module.
+
+The default elaboration scheme is purely sequential and compiles mlb files as
+they are encountered, starting from the root mlb. E.g the following mlb files
+
+    $ cat a.mlb
+    local
+      $(SML_LIB)/basis/basis.mlb
+    in
+      a.sml
+    end
+    $ cat b.mlb
+    local
+      $(SML_LIB)/basis/basis.mlb
+      a.sml
+    in
+      b.sml
+    end
+    $ cat root.mlb
+    local
+      $(SML_LIB)/basis/basis.mlb
+      b.mlb
+      c.sml
+      a.mlb
+    in
+      main.sml
+    end
+
+are compiled in this order:
+
+1. root.mlb
+   1. basis.mlb
+   3. b.mlb
+      2. a.sml
+      3. b.sml
+   2. c.sml
+   3. a.mlb
+      1. a.sml
+   3. main.sml
+
+It is possible to force all "dependencies" of an mlb file to be fully elaborated
+before said mlb file is processed. The above mlb files could then be compiled as
+follows:
+
+1. basis.mlb
+2. b.mlb
+   1. a.sml
+   2. b.sml
+3. a.mlb
+   1. a.sml
+4. root.mlb
+   1. c.sml
+   2. main.sml
+
+Note that elaboration order is only guaranteed in the default case (encounter
+order); if forcing dependencies first, the order in which independent mlb files
+are processed is undefined. E.g here a.mlb could be processed before b.mlb.
+
+###  Parallel compilation
+
+Parallel compilation works at the mlb level. In this example, a.mlb and b.mlb
+may be processed at the same time. Elaboration of a single mlb file is always
+sequential, regardless of the given options.
+
+If the 'dependencies first' option is not set, then the elaboration of an mlb
+file may be started before its dependencies have completed; then when reaching
+a import directive that references an mlb which has yet to start or is
+elaborating, the current elaboration is simply parked until the dependency is
+ready and the processing thread switches to another job.
+
+A possible parallel elaboration trace for root.mlb could look like this, if for
+some reason compiling a.mlb took longer than b.mlb:
+
+ 1. start root.mlb
+ 2. start basis.mlb
+ 3. start a.mlb
+ 4. start b.mlb
+ 5. complete basis.mlb
+ 6. check root.mlb for basis.mlb; continue
+ 7. check root.mlb for b.mlb; park
+ 8. complete b.mlb
+ 9. resume root.mlb
+10. compile c.sml
+11. check root.mlb for a.mlb; park
+12. complete a.mlb
+13. resume root.mlb
+14. compile main.sml
+15. complete root.mlb
+
+The order in which mlb files are elaborated, started or resumed is undefined
+and depends on a number of different factors, such as dependency order, thread
+count, etc. The only guarantee is that of the dependencies first option.
+
+Although it may seem that allowing an mlb file to start only after its mlb
+dependencies are elaborated limits parallelism, most mlb files likely look like
+the following:
+
+    local
+      $(SML_BASIS)/basis/basis.mlb
+      dep1.mlb
+      ...
+      source1.sml
+      ...
+    in
+      source2.sml
+      ...
+    end
+
+in which case there is at best very little to be gained from concurrent
+elaboration since the actual time consuming part of the process is compiling
+SML source files, which may only happen after all dependencies are completely
+finished due to the sequential nature of within-mlb elaboration.
+
+### Errors and cancellation
+
+Elaboration is completely aborted when an error is encountered; which, assuming
+the given data is correct, means the error happened either when compiling SML
+source files or in a rebinding / open MLB directive such as `structure S1 = S2`.
+If this is the former, then it may be due to an I/O error, an ill-formed program
+that did not compile or top level code that failed in a way or another.
+
+In the case of parallel compilation, all processing threads are interrupted
+synchronously, i.e when they reach a suitable break point. Such a break point
+is one of:
+
+- before starting a new job;
+- after completing a job (e.g after completing or parking an mlb file);
+- before each declaration in an mlb file.
+
+Finer grained constructs, such as SML compilation, are never interrupted (at
+least not by the library itself), i.e if an error happens while an SML file is
+being compiled, then it will be entirely compiled and its top level executed
+before the thread actually exits.
+
+Further errors that happen during the timeframe between the first error and all
+threads exiting are discarded and only the original one is reported.

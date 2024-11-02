@@ -1,0 +1,15 @@
+local
+  $(SML_LIB)/basis/basis.mlb
+  $(SML_LIB)/basis/poly.mlb
+  ThreadPool.sml
+  Lex.sml
+  Parse.sml
+  Ann.sml
+  Path.sml
+  Basis.sml
+  Dag.sml
+  NameSpace.sml
+  Compile.sml
+in
+  PolyMLB.sml
+end

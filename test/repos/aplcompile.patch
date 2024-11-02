@@ -1,0 +1,22 @@
+diff --git a/aplc.sml b/aplc.sml
+index 5970740..55f901d 100644
+--- a/aplc.sml
++++ b/aplc.sml
+@@ -1,10 +1,8 @@
+ structure AplToMla = AplCompile(Mla)
+ structure AplToC = AplCompile(ILapl)
+ 
+-val name = CommandLine.name()
+-
+ fun usage() =
+-    (print ("Usage: " ^ name ^ " [-o ofile] [-c] [-v] [-ml] file.apl...\n" ^
++    (print ("Usage: " ^ CommandLine.name() ^ " [-o ofile] [-c] [-v] [-ml] file.apl...\n" ^
+             "   -o file : specify output file\n" ^
+             "   -c : compile only (no evaluation)\n" ^
+             "   -noopt : disable optimizations\n" ^
+@@ -29,4 +27,4 @@ fun runargs args flags =
+         else !compileAndRunFiles flags args
+       | nil => usage ()
+ 
+-val () = runargs (CommandLine.arguments()) nil
++fun main () = runargs (CommandLine.arguments()) nil

@@ -1,0 +1,25 @@
+diff --git a/Makefile b/Makefile
+index 7433195..34a0789 100644
+--- a/Makefile
++++ b/Makefile
+@@ -29,7 +29,7 @@ src/version~: force
+ 	@echo '$(GIT_VERSION) $(GIT_DATE)' | cmp -s - $@ || echo '$(GIT_VERSION) $(GIT_DATE)' > $@
+ 
+ src/version.sml: src/version~
+-	@echo "structure Version = struct\n\
++	@echo -e "structure Version = struct\n\
+    val version = \"$(GIT_VERSION)\"\n\
+    val date = \"$(GIT_DATE)\"\n\
+    val platform = \"$(PLATFORM)\"\nend" > $@
+diff --git a/src/aplt.sml b/src/aplt.sml
+index 2a7db7f..4ac39ca 100644
+--- a/src/aplt.sml
++++ b/src/aplt.sml
+@@ -152,6 +152,6 @@ fun usage() =
+     " -opt_loopsplit : enable loop split optimization in LAILA code generation\n"
+ 
+ (* Parse command line arguments and pass to compileAndRun *)
+-val () = Flags.runargs {usage = usage,
++fun main () = Flags.runargs {usage = usage,
+                         run = compileAndRun,
+                         unaries = ["-o","-oc","-O"]}

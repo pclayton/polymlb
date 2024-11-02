@@ -1,0 +1,16 @@
+diff --git a/src/futpkg.sml b/src/futpkg.sml
+index 2b73589..d6cfa7e 100644
+--- a/src/futpkg.sml
++++ b/src/futpkg.sml
+@@ -1,2 +1,2 @@
+ 
+-val () = Pkg.main "futhark.pkg"
++fun main () = Pkg.main "futhark.pkg"
+diff --git a/src/smlpkg.sml b/src/smlpkg.sml
+index 655937b..19f3cd0 100644
+--- a/src/smlpkg.sml
++++ b/src/smlpkg.sml
+@@ -1,2 +1,2 @@
+ 
+-val () = Pkg.main "sml.pkg"
++fun main () = Pkg.main "sml.pkg"

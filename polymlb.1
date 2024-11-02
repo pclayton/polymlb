@@ -1,0 +1,160 @@
+.Dd $Mdocdate: November 01 2024 $
+.Dt POLYMLB 1
+.Os
+.Sh NAME
+.Nm polymlb
+.Nd ML Basis implementation for Poly/ML
+.Sh SYNOPSYS
+.Nm polymlb
+.Op OPTIONS
+.Ar FILE
+.Sh DESCRIPTION
+.Nm
+is a complete implementation of the ML Basis system for Poly/ML.
+The argument
+.Ar FILE
+is an ML Basis file which is compiled and exported using the PolyML.export
+function, then linked with the Poly/ML library by invoking
+.Xr polyc 1
+on the resulting object file. The root function to export is expected to
+be a top level value that matches the following spec:
+.Bd -literal -compact
+	val main : unit -> unit
+.Ed
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl ann Ar ann
+Wrap
+.Ar FILE
+with the given annotation. Use multiple times for multiple annotations. See
+.Sx ANNOTATIONS .
+.It Fl c, Fl compile
+Compile but do not link.
+.It Fl deps-first
+Compile MLB files only after their dependencies. See
+.Sx ELABORATION .
+.It Fl h, Fl help
+Print help usage and exit.
+.It Fl info
+Print useful information, such as the default value of
+.Pa SML_LIB
+and the version of the Poly/ML compiler, and exit.
+.It Fl ignore-call-main
+Ignore files with a base name of
+.Pa call-main.sml .
+This is equivalent to
+.Fl ann
+\&'ignoreFiles call-main.sml\'.
+.It Fl ignore-main
+Ignore files with a base name of
+.Pa main.sml .
+This is equivalent to
+.Fl ann
+\&'ignoreFiles main.sml\'.
+.It Fl jobs Ar n
+Set the maximum number of jobs, with 0 meaning unbounded. See
+.Sx ELABORATION .
+.It Fl mlb-path-map Ar file
+Source additional MLB path variables from
+.Ar file .
+Each line consists of two whitespace separated tokens, with the first one
+being the variable name and the second its value. Multiple uses are allowed,
+with later definitions taking precedence over earlier ones. See
+.Sx VARIABLES .
+.It Fl mlb-path-var Ar 'name\ value'
+Define an additional MLB path variable, replacing any existing variable
+with the same name. Multiple uses are allowed, with later definitions
+taking precedence over earlier ones. See
+.Sx VARIABLES .
+.It Fl main Ar name
+The fully qualified name of the root function to be passed to PolyML.export.
+It must be of type
+.Vt unit\ ->\ unit .
+.It Fl o, Fl output Ar file
+Specify the output file. If only exporting to an object file, then
+.Ar file
+will be appended an ".o" extension if it does not have one.
+.It Fl polyc Ar polyc
+Link using
+.Ar polyc
+instead of "polyc".
+.It Fl print-out
+Print the name of the out file on stdout after successful compilation.
+.It Fl q, Fl quiet
+Silence warnings.
+.It Fl sml-lib
+Print the resolved value of
+.Pa SML_LIB
+and exit. This takes into account all additional variables defined through
+.Fl mlb-path-vmap
+and
+.Fl mlb-path-var .
+If an unbound variable identifier prevents resolving the value of
+.Pa SML_LIB ,
+it will be printed on stderr.
+.It Fl v, Fl version
+Print PolyMLB and Poly/ML version and exit.
+.Sh ML BASIS
+.Ss ELABORATION
+An MLB file is always elaborated sequentially and a single time, with the result
+being cached for subsequent reuses, though there is no guarantee that
+elaboration is done atomically. By default, an MLB graph (the given root MLB
+file and all transitively reachable MLB files) is evaluated sequentially in
+encounter order.
+.Pp
+If
+.Ic -deps-first
+is specified, an MLB file will start elaboration after all its dependencies
+have completed. If a
+.Ic -jobs
+argument is given, then up to that many MLB files may be processed in parallel.
+.Pp
+If either dependencies first or parallelism is enabled, the actual elaboration
+order is undefined.
+.Pp
+Elaboration is aborted on the first error. If other MLB files are being
+elaborated when aborting, these are only stopped when they reach a break
+point, which is before processing any MLB declaration. Errors that happen
+after the one that caused elaboration to abort are discarded.
+.Ss LIBRARIES
+The following libraries are available:
+.Bl -tag -width "$(SML_LIB)/polymlb/polymlb.mlb" -offset indent -compact
+.It Pa $(SML_LIB)/basis/basis.mlb
+Standard ML Basis library
+.It Pa $(SML_LIB)/basis/poly.mlb
+Poly/ML library extensions
+.It Pa $(SML_LIB)/polymlb/polymlb.mlb
+PolyMLB library
+.Ss ANNOTATIONS
+The following annotations are recognized, with an optional
+.Cm poly:
+prefix:
+.Bl -tag -width "ignoreFiles f1,f2..." -offset indent -compact
+.It Cm debug {true|false}
+enable debug information
+.It Cm discard
+ignore enclosed declarations
+.It Cm ignoreFiles f1,f2...
+ignore files with a matching basename.
+.Ss VARIABLES
+The only variable set by default is
+.Pa SML_LIB .
+Its raw value can be printed using
+.Cm -info
+and its resolved value with
+.Cm -sml-lib .
+.Sh SEE ALSO
+.Xr poly 1 ,
+.Xr polyc 1
+.Pp
+The Poly/ML
+.Lk https://polyml.org "website" ,
+the ML Basis
+.Lk http://mlton.org/MLBasis "documentation"
+and its
+.Lk http://mlton.org/MLBasis.attachments/mlb-formal.pdf "formal specification" .
+.Pp
+The documentation for the
+.Lk https://smlfamily.github.io/Basis/ "Standard ML Basis library"
+and the
+.Lk https://polyml.org/documentation/Reference/Basis.html "Poly/ML library extensions" .
