@@ -8,21 +8,25 @@ SML_LIB   ?= $(LIBDIR)/polymlb
 POLYC     ?= polyc
 INSTALL   ?= install
 
+SRC != ls src/bin/*.sml src/lib/*.sml
+
 all: polymlb
 
-polymlb: src/*/*.sml
+polymlb: $(SRC)
 	SML_LIB=$(SML_LIB) $(POLYC) -o $@ src/bin/build.sml
 
-install: all
+sml_lib: polymlb
 	$(eval SML_LIB != ./polymlb -sml-lib)
+
+install: all sml_lib
 	$(INSTALL) -m 755 -d $(DESTDIR)$(BINDIR)
 	$(INSTALL) -m 755 -d $(DESTDIR)$(SML_LIB)
 	$(INSTALL) -m 755 -d $(DESTDIR)$(MANDIR)/man1
 	$(INSTALL) -m 755 polymlb   $(DESTDIR)$(BINDIR)
-	cp -rL lib/*                 $(DESTDIR)$(SML_LIB)
+	cp -RL lib/*                $(DESTDIR)$(SML_LIB)
 	$(INSTALL) -m 644 polymlb.1 $(DESTDIR)$(MANDIR)/man1
 
 clean:
 	rm -f polymlb
 
-.PHONY: all clean install test
+.PHONY: all clean install sml_lib test
