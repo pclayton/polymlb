@@ -18,6 +18,9 @@ polymlb: $(SRC)
 sml_lib: polymlb
 	$(eval SML_LIB != ./polymlb -sml-lib)
 
+test:
+	$(MAKE) -C test all
+
 install: all sml_lib
 	$(INSTALL) -m 755 -d $(DESTDIR)$(BINDIR)
 	$(INSTALL) -m 755 -d $(DESTDIR)$(SML_LIB)
@@ -28,5 +31,6 @@ install: all sml_lib
 
 clean:
 	rm -f polymlb
+	$(MAKE) -C test clean
 
 .PHONY: all clean install sml_lib test
