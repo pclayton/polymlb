@@ -22,12 +22,11 @@ fun eval s =
     val str = TextIO.openString s
   in
     PolyML.compiler (fn () => TextIO.input1 str, []) ()
-  end
+  end;
 
-val _ = PolyML.use (libDir ^ "/build.sml")
+PolyML.use (libDir ^ "/build.sml");
 
-val _ =
-  eval ("HashArray.update (PolyMLB.pathMap, \"SML_LIB\", \"" ^ SML_LIB ^ "\")")
+eval ("HashArray.update (PolyMLB.pathMap, \"SML_LIB\", \"" ^ SML_LIB ^ "\")");
 
-val _ = use (binDir ^ "/version.sml")
-val _ = use (binDir ^ "/main.sml")
+use (binDir ^ "/version.sml");
+use (binDir ^ "/main.sml")
