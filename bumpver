@@ -1,13 +1,23 @@
 #!/usr/bin/env sh
 
 case $1 in
-major|minor|patch) bump=$1 ;;
+major) prog='
+	/MAJOR/ { $2++; major = $2; print $1 "= " $2 }
+	/MINOR/ { minor = 0; print $1 "= 0" }
+	/PATCH/ { patch = 0; print $1 "= 0" }
+';;
+minor) prog='
+	/MAJOR/ { major = $2 + 0; print $0 }
+	/MINOR/ { $2++; minor = $2; print $1 "= " $2 }
+	/PATCH/ { patch = 0; print $1 "= 0" }
+';;
+patch) prog='
+	/MAJOR/ { major = $2 + 0; print $0 }
+	/MINOR/ { minor = $2 + 0; print $0 }
+	/PATCH/ { $2++; patch = $2; print $1 "= " $2 }
+';;
+*) echo "usage: $(basename $0) {major|minor|patch}" && exit 1
 esac
-
-if [ -z "$bump" ]; then
-	echo "usage: $(basename $0) {major|minor|patch}"
-	exit 1
-fi
 
 cd "$(dirname $0)"
 
@@ -19,32 +29,20 @@ elif ! git diff-index --quiet HEAD; then
 	exit 1
 fi
 
-case $bump in
-major) prog='
-	/MAJOR/ { $2++; major = $2; print $1 "= " $2 }
-	/MINOR/ { minor = 0; print $1 "= 0" }
-	/PATCH/ { patch = 0; print $1 "= 0" }
-' ;;
-minor) prog='
-	/MAJOR/ { major = $2 + 0; print $0 }
-	/MINOR/ { $2++; minor = $2; print $1 "= " $2 }
-	/PATCH/ { patch = 0; print $1 "= 0" }
-';;
-patch) prog='
-	/MAJOR/ { major = $2 + 0; print $0 }
-	/MINOR/ { minor = $2 + 0; print $0 }
-	/PATCH/ { $2++; patch = $2; print $1 "= " $2 }
-';;
-esac
-
 end='END { print major "." minor "." patch }'
+prog="$prog $end"
 
 file=src/bin/version.sml
-z=$(awk -F '=' "$prog $end" < "$file")
+
+z=$(awk -F '=' "$prog" < "$file")
 ver="$(echo "$z" | tail -1)"
 echo "$(echo "$z" | head -n -1)" > "$file"
 
-git commit -am "v$ver"
-git tag "v$ver"
+git commit -am "v$ver" || { echo "could not commit" && exit 1; }
 
-echo "bumped to $ver"
+if git tag -a -m "release v$ver" "v$ver"; then
+	echo "bumped to $ver"
+else
+	echo "could not tag"
+	exit 1
+fi
