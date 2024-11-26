@@ -217,7 +217,7 @@ struct
         , dAnns    = fd (fn DisabledAnns l => SOME l | _ => NONE) []
         , pathMap  = fd (fn PathMap m => SOME m | _ => NONE) (H.hash 1)
         , preproc  = fd (fn Preprocess f => SOME f | _ => NONE) pp
-        , rPreproc = fd (fn PreprocessRoot f => SOME f | _ => NONE) pp
+        , rpreproc = fd (fn PreprocessRoot f => SOME f | _ => NONE) pp
         , warnCb   = fd (fn WarningHandler f => SOME f | _ => NONE) wh
         }
       end
@@ -225,7 +225,6 @@ struct
 
   fun doBasis f opts src =
     let
-      val path = OSF.fullPath src
       val opts as { warnCb, ... } = doOpts opts
 
       val pathMap =
@@ -266,20 +265,13 @@ struct
         }
 
       fun mkBas p =
-        ( #preproc opts
+        ( (if p = src then #rpreproc else #preproc) opts
         o Basis.fromParse (convOpts p)
         o Parse.parse { fileName = p, lineOffset = 0 }
         o readFile
         ) p
     in
-      Ok
-        (( f
-         o Dag.process mkBas
-         o (fn b => (path, b))
-         o #rPreproc opts
-         o Basis.fromParse (convOpts path)
-         o Parse.parse { fileName = path, lineOffset = 0 }
-         ) src)
+      (Ok o f o Dag.process mkBas o OSF.fullPath) src
     end
       handle
         Parse.Parse z      => Error (Parse z)

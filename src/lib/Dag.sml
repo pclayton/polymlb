@@ -22,7 +22,7 @@ sig
    * The given function takes in the absolute path of an mlb file and must
    * return its content.
    *)
-  val process : (string -> Basis.t) -> (string * Basis.t) -> t
+  val process : (string -> Basis.t) -> string -> t
 end =
 struct
   structure H = HashArray
@@ -378,5 +378,5 @@ struct
       }
     end
 
-  fun process f = mkDag o reduce o traverse f
+  fun process f s = (mkDag o reduce o traverse f) (s, f s)
 end
