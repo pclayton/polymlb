@@ -24,6 +24,11 @@ fun eval s =
     PolyML.compiler (fn () => TextIO.input1 str, []) ()
   end;
 
+if OS.Path.isRelative SML_LIB then
+  TextIO.output (TextIO.stdErr, "warning: relative SML_LIB (" ^ SML_LIB ^ ")\n")
+else
+  ();
+
 PolyML.use (libDir ^ "/build.sml");
 
 eval ("HashArray.update (PolyMLB.pathMap, \"SML_LIB\", \"" ^ SML_LIB ^ "\")");
