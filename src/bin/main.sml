@@ -310,7 +310,7 @@ local
   fun err _ = ()
 in
   fun doCompile (opts as { file, ... } : opts) : P.NameSpace.t =
-    case P.compile (o2o opts) (P.File file) of
+    case P.compile (o2o opts) file of
       P.Ok ns => ns
     | P.Error e => (die (PolyMLB.errToStringd e); raise Fail "")
 end

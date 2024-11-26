@@ -20,11 +20,6 @@ sig
 
   type opts = opt list
 
-  datatype src =
-    File of string
-  (* basis to be parsed * path to dir for relative paths (default = cwd) *)
-  | String of string * string option
-
   datatype err =
     Parse of Parse.err
   | Validation of Basis.err
@@ -39,10 +34,10 @@ sig
   (* Default path map *)
   val pathMap : string HashArray.hash
 
-  val compile : opts -> src -> NameSpace.t result
+  val compile : opts -> string -> NameSpace.t result
 
   (* Compile and import the content of the basis in the global namespace. *)
-  val import : opts -> src -> unit result
+  val import : opts -> string -> unit result
 
   (* Compile and import an mlb file, much like the top level `use`. *)
   val use : string -> unit
@@ -76,10 +71,6 @@ struct
   | WarningHandler of warn -> unit
 
   type opts = opt list
-
-  datatype src =
-    File of string
-  | String of string * string option
 
   datatype err =
     Parse of Parse.err
@@ -201,9 +192,6 @@ struct
       TextIO.inputAll s before TextIO.closeIn s
     end
 
-  fun source (File f) = readFile f
-    | source (String (s, _)) = s
-
   local
     fun find f l v =
       let
@@ -237,12 +225,7 @@ struct
 
   fun doBasis f opts src =
     let
-      val path =
-        case src of
-          File f => OSF.fullPath f
-        | String (_, SOME p) => OSF.fullPath p ^ "/"
-        | _ => OSF.getDir () ^ "/"
-
+      val path = OSF.fullPath src
       val opts as { warnCb, ... } = doOpts opts
 
       val pathMap =
@@ -296,7 +279,6 @@ struct
          o #rPreproc opts
          o Basis.fromParse (convOpts path)
          o Parse.parse { fileName = path, lineOffset = 0 }
-         o source
          ) src)
     end
       handle
@@ -317,7 +299,7 @@ struct
     fun wh w = TextIO.print (warnToStringd w ^ "\n")
   in
     fun use s =
-      case compile [WarningHandler wh] (File s) of
+      case compile [WarningHandler wh] s of
         Ok ns => NameSpace.import (NameSpace.global, ns)
       | Error e =>
           (TextIO.print (errToStringd e ^ "\n"); raise Fail "Static errors")
