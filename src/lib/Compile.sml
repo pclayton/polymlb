@@ -19,6 +19,7 @@ sig
    * side effects from top level declarations.
    * Does not handle IO.Io and raises Compile on non IO error.
    * single job and depsFirst = false is guaranteed to be encounter order.
+   * The logger may be called from different threads if multiple jobs.
    *)
   val compile : Log.logger -> opts -> Dag.t -> NameSpace.t
 end =
