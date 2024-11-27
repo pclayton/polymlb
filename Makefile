@@ -31,6 +31,8 @@ install: all sml_lib
 
 clean:
 	rm -f polymlb
+
+test-clean:
 	$(MAKE) -C test clean
 
 .PHONY: all clean install sml_lib test
