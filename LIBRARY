@@ -42,27 +42,26 @@ avoid catastrophic failure.
 
 ## Implementation overview
 
-The library is mostly designed as a pipeline where each stage trusts that the
-data is valid in regards to its predecessors; thus general error policy is to
-simply raise an exception and let it propagate. The PolyMLB structure is in fact
-only glue code for the different components with some error handling.
-
 The exposed inner modules are as follows:
 
-- Lex, mlb lexing utilies;
-- Parse, mlb parsing;
-- Path, path validation;
 - Ann, annotations utilites;
 - Basis, mlb validation and conversion from parse results;
+- Compile, mlb compilation;
 - Dag, mlb graph processing and validation;
+- Lex, mlb lexing utilies;
 - NameSpace, result of mlb compilation;
-- Compile, mlb compilation.
+- Parse, mlb parsing;
+- Path, path validation.
 
-By design, compilation only happens if everything was successfully validated,
-i.e after every mlb file has been parsed and checked. As a consequence, the
-Compile module expects that there is no missing dependency and also does not
-check for cycles, in which case the result of a compilation is undefined
-(pick one of infinite recursion, deadlock or incorrect compilation).
+The library is mostly designed as a two-stage process. The first one is the Dag
+module, in charge of traversing and checking the entire MLB graph. The second
+is Compile, which elaborates a graph; it completely trusts its input and expects
+that there is no missing dependency, cycle, etc.
+
+The general error policy is to raise an exception and let it propagate. The
+PolyMLB structure is in fact only glue code for the different components with
+some error handling.
+
 
 Compilation works with namespaces (`NameSpace.t`), which are representations
 of a 'basis' as described in [1]:
