@@ -12,6 +12,7 @@ app PolyML.Compiler.forgetStructure
   , "Dag"
   , "Fifo"
   , "Lex"
+  , "Log"
   , "NameSpace"
   , "Prio"
   , "Parse"

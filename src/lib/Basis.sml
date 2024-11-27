@@ -28,9 +28,7 @@ sig
   type t = dec list
 
   type opts =
-    (* called with invalid annotations *)
-    { annCb : string * PolyML.location -> unit
-    , disabledAnns : Ann.t list
+    { disabledAnns : Ann.t list
     , pathMap : string HashArray.hash
     (* absolute path to a directory from which to resolve relative paths *)
     , path : string
@@ -58,7 +56,7 @@ sig
    * - operation lists are inlined, e.g `open bas1 bas2` or
    *   `structure S1 = S2 and S3 = S4` become two disctint declarations
    *)
-  val fromParse : opts -> Parse.t -> t
+  val fromParse : Log.logger -> opts -> Parse.t -> t
 end =
 struct
   structure CV = CharVector
@@ -86,8 +84,7 @@ struct
   type t = dec list
 
   type opts =
-    { annCb : string * PolyML.location -> unit
-    , disabledAnns : Ann.t list
+    { disabledAnns : Ann.t list
     , pathMap : string HashArray.hash
     , path : string
     , exts : string list option
@@ -142,6 +139,12 @@ struct
           (x1::xs, f (x1, x2) :: r))
       ([], []) l)
 
+  fun badAnn { pathFmt, print } (a, loc) =
+    print
+      ( Log.Warn
+      , S.concat [Log.locFmt pathFmt loc, ": unrecognized annotation '", a, "'"]
+      )
+
   fun annCheck (xs, dis, cb, loc) =
     let
       fun f ([], r, p) = (L.rev r, p)
@@ -159,7 +162,7 @@ struct
       f (xs, [], [])
     end
 
-  fun fromParse ({ annCb, disabledAnns, pathMap, path, exts } : opts) =
+  fun fromParse logger { disabledAnns, pathMap, path, exts } =
     let
       fun conv ignored ds =
         let
@@ -173,7 +176,7 @@ struct
                 | SOME (MLB, p) => BasisFile p :: ds
                 | SOME (SML, p) => SourceFile p :: ds)
             | dec ((P.Ann (l, ds'), loc), ds) =
-                (case annCheck (l, disabledAnns, annCb, loc) of
+                (case annCheck (l, disabledAnns, badAnn logger, loc) of
                   ([], p) => conv (p @ ignored) ds' @ ds
                 | (l, p) =>
                     if Ann.exists Ann.Discard l then

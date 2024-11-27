@@ -92,7 +92,12 @@ and
 If an unbound variable identifier prevents resolving the value of
 .Pa SML_LIB ,
 it will be printed on stderr.
-.It Fl v, Fl version
+.It Fl v, Fl verbose Ar n
+Set the verbosity level for logging.
+.Ar n
+must be a positive integer, with 0 meaning that only warnings and errors are
+logged.
+.It Fl V, Fl version
 Print PolyMLB and Poly/ML version and exit.
 .Sh ML BASIS
 .Ss ELABORATION

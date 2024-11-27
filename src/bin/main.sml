@@ -20,22 +20,22 @@ type opts =
   , polyc    : string
   , pSuccess : bool
   , quiet    : bool
+  , verbose  : int
   }
 
 local
   fun name () = CommandLine.name () ^ ": "
   fun f str s =
-    ( TIO.output (str, s)
-    ; if not (S.isSuffix "\n" s) then TIO.output (str, "\n") else ()
-    ; TIO.flushOut str
-    )
+    if S.isSuffix "\n" s then
+      TIO.output (str, s)
+    else
+      TIO.output (str, s ^ "\n")
 in
   val println = f TIO.stdOut
   val eprintln = f TIO.stdErr
-  fun eprintln' s = (TIO.output (TIO.stdErr, name ()); eprintln s)
+  fun die "" = OSP.exit OSP.failure
+    | die msg = (eprintln msg; OSP.exit OSP.failure)
 end
-
-fun die msg = eprintln' msg before OSP.exit OSP.failure
 
 fun success () = OSP.exit OSP.success
 
@@ -71,7 +71,8 @@ local
 , "   -print-out                     Print out file name to stdout if success"
 , "-q -quiet                         Silence warnings"
 , "   -sml-lib                       Print the resolved value of $(SML_LIB)"
-, "-v -version                       Print PolyMLB version"
+, "-v -verbose <n>                   Set verbosity level"
+, "-V -version                       Print PolyMLB version"
 ] before success ()
 
   val VERSION =
@@ -105,6 +106,7 @@ local
     , polyc    = ref "polyc"
     , pSuccess = ref false
     , quiet    = ref false
+    , verbose  = ref 0
     }
 
   fun req s = [] before die ("missing required argument for option " ^ s)
@@ -160,15 +162,10 @@ local
           NONE => inv ("-ann", x)
         | SOME a => xs before #anns d := a :: !(#anns d)
 
-  fun jobs [] = req "-jobs"
-    | jobs (x::xs) =
-        case Int.fromString x of
-          NONE => inv ("-jobs", x)
-        | SOME i =>
-            if i < 0 then
-              inv ("-jobs", x)
-            else
-              xs before #jobs d := i
+  fun posInt s =
+    case Int.fromString s of
+      NONE => NONE
+    | SOME i => if i < 0 then NONE else SOME i
 in
   fun parseArgs () : opts =
     let
@@ -191,7 +188,7 @@ in
                   #anns d := P.Ann.IgnoreFiles ["call-main.sml"] :: !(#anns d)
               | "-ignore-main" =>
                   #anns d := P.Ann.IgnoreFiles ["main.sml"] :: !(#anns d)
-              | "-jobs" => l := jobs xs
+              | "-jobs" => l := set (xs, "-jobs", #jobs, posInt)
               | "-main" => l := set (xs, "-main", #main, SOME)
               | "-mlb-path-map" => l := map xs
               | "-mlb-path-var" => l := var xs
@@ -202,7 +199,9 @@ in
               | "-q" => #quiet d := true
               | "-quiet" => #quiet d := true
               | "-sml-lib" => #cmd d := SmlLib
-              | "-v" => version ()
+              | "-v" => l := set (xs, "-v", #verbose, posInt)
+              | "-verbose" => l := set (xs, "-v", #verbose, posInt)
+              | "-V" => version ()
               | "-version" => version ()
               | s =>
                   if S.isPrefix "-" s then
@@ -237,6 +236,7 @@ in
         , polyc    = !(#polyc d)
         , pSuccess = !(#pSuccess d)
         , quiet    = !(#quiet d)
+        , verbose  = !(#verbose d)
         }
     in
       if #cmd opts = SmlLib then
@@ -288,16 +288,34 @@ end
 
 local
   structure P = PolyMLB
+  datatype z = datatype P.Log.level
 
-  val warn = eprintln' o P.warnToStringd
+  fun log v (Trace, m) = if v > 2 then println m else ()
+    | log v (Debug, m) = if v > 1 then println m else ()
+    | log v (Info, m) = if v > 0 then println m else ()
+    | log _ (_, m) = println m
 
-  fun o2o ({ anns, depsf, jobs, pathMap, quiet, ... } : opts) =
+  fun fmt p =
+    let
+      val cwd = OS.FileSys.getDir ()
+    in
+      if S.isPrefix cwd p then
+        OS.Path.mkRelative { path = p, relativeTo = cwd }
+      else
+        p
+    end
+
+  fun o2o ({ anns, depsf, jobs, pathMap, quiet, verbose, ... } : opts) =
     let
       val l =
         [ P.PathMap pathMap
         , P.CompileOpts { jobs = jobs, depsFirst = depsf, copts = [] }
         ]
-      val l = if not quiet then (P.WarningHandler warn)::l else l
+      val l =
+        if quiet then
+          l
+        else
+          P.Logger { pathFmt = fmt, print = log verbose } :: l
       val l =
         if List.null anns then
           l
@@ -312,7 +330,7 @@ in
   fun doCompile (opts as { file, ... } : opts) : P.NameSpace.t =
     case P.compile (o2o opts) file of
       P.Ok ns => ns
-    | P.Error e => (die (PolyMLB.errToStringd e); raise Fail "")
+    | P.Error _ => (die ""; raise Fail "")
 end
 
 local

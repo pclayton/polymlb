@@ -7,6 +7,7 @@ in
     stub.sml
   end
   local
+    ../lib/Log.sml
     ../lib/ThreadPool.sml
     ../lib/Lex.sml
     ../lib/Parse.sml

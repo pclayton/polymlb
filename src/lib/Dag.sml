@@ -22,7 +22,7 @@ sig
    * The given function takes in the absolute path of an mlb file and must
    * return its content.
    *)
-  val process : (string -> Basis.t) -> string -> t
+  val process : Log.logger -> (string -> Basis.t) -> string -> t
 end =
 struct
   structure H = HashArray
@@ -187,7 +187,7 @@ struct
    * sequentially from the root.
    * Nested hash maps instead of list H.hash to filter out duplicates.
    *)
-  fun traverse getBas (name, bas) : ir =
+  fun traverse getBas root : ir =
     let
       val bases : (int * Basis.t) H.hash = H.hash 10
       val deps  : int H.hash H.hash = H.hash 10
@@ -235,10 +235,12 @@ struct
       and exp (Bas ds, ps, is) = dec (ds, ps, is)
         | exp (Let (ds, e), ps, is) = (dec (ds, ps, is); exp (e, ps, is))
         | exp (Id _, _, _) = ()
+
+      val bas = getBas root
     in
-      H.update (bases, name, (0, bas));
-      dec (bas, [name], []);
-      { root = name, bases = bases, deps = deps, revs = revs, order = !order }
+      H.update (bases, root, (0, bas));
+      dec (bas, [root], []);
+      { root = root, bases = bases, deps = deps, revs = revs, order = !order }
     end
 
   (* Hsu's algorithm for transitive reduction; "An algorithm for finding a
@@ -378,5 +380,15 @@ struct
       }
     end
 
-  fun process f s = (mkDag o reduce o traverse f) (s, f s)
+  fun process { pathFmt, print } f s =
+    let
+      fun p m = print (Log.Debug, m)
+      val f = fn s => (p ("parsing " ^ pathFmt s); f s)
+      fun (m @ f) z = (p m; f z)
+    in
+      ( "building MLB graph"   @ mkDag
+      o "reducing MLB graph"   @ reduce
+      o "traversing MLB graph" @ traverse f
+      ) s
+    end
 end
