@@ -320,7 +320,10 @@ local
         if List.null anns then
           l
         else
-          (P.PreprocessRoot (fn b => [P.Basis.Ann (anns, b)])) :: l
+          P.Preprocess
+            (fn { bas, root = true, ... } => [P.Basis.Ann (anns, bas)]
+              | { bas, ... } => bas)
+          :: l
     in
       l
     end

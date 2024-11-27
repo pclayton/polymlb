@@ -8,10 +8,8 @@ sig
   | Logger of Log.logger
     (* in addition to the default path map *)
   | PathMap of string HashArray.hash
-    (* called only with the root source *)
-  | PreprocessRoot of Basis.t -> Basis.t
     (* called for all other mlb files *)
-  | Preprocess of Basis.t -> Basis.t
+  | Preprocess of { bas : Basis.t, path : string, root : bool } -> Basis.t
 
   type opts = opt list
 
@@ -51,8 +49,7 @@ struct
   | DisabledAnns of Ann.t list
   | Logger of Log.logger
   | PathMap of string HashArray.hash
-  | PreprocessRoot of Basis.t -> Basis.t
-  | Preprocess of Basis.t -> Basis.t
+  | Preprocess of { bas : Basis.t, path : string, root : bool } -> Basis.t
 
   type opts = opt list
 
@@ -148,7 +145,7 @@ struct
         Option.getOpt (fd l, v)
       end
 
-    fun pp (z : Basis.t) = z
+    fun pp { bas : Basis.t, path = _ : string, root = _ : bool } = bas
     val log = { pathFmt = fn z => z, print = fn _ => () }
   in
     fun getCopts opts =
@@ -165,7 +162,6 @@ struct
         , logger   = fd (fn Logger ff => SOME ff | _ => NONE) log
         , pathMap  = fd (fn PathMap m => SOME m | _ => NONE) (H.hash 1)
         , preproc  = fd (fn Preprocess f => SOME f | _ => NONE) pp
-        , rpreproc = fd (fn PreprocessRoot f => SOME f | _ => NONE) pp
         }
       end
   end
@@ -191,7 +187,11 @@ struct
         }
 
       fun mkBas p =
-        ( (if p = src then #rpreproc else #preproc) opts
+        ( (fn b =>
+            if p = src then
+              #preproc opts { bas = b, path = p, root = true }
+            else
+              #preproc opts { bas = b, path = p, root = false })
         o Basis.fromParse logger (convOpts p)
         o Parse.parse { fileName = p, lineOffset = 0 }
         o readFile
