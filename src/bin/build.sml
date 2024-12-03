@@ -25,7 +25,12 @@ fun eval s =
   end;
 
 if OS.Path.isRelative SML_LIB then
-  TextIO.output (TextIO.stdErr, "warning: relative SML_LIB (" ^ SML_LIB ^ ")\n")
+  TextIO.output (TextIO.stdErr, "warning: SML_LIB: relative path\n")
+else
+  ();
+
+if String.isSuffix "/" SML_LIB then
+  TextIO.output (TextIO.stdErr, "warning: SML_LIB: trailing '/'\n")
 else
   ();
 
