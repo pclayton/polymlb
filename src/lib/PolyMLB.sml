@@ -8,7 +8,6 @@ sig
   | Logger of Log.logger
     (* in addition to the default path map *)
   | PathMap of string HashArray.hash
-    (* called for all other mlb files *)
   | Preprocess of { bas : Basis.t, path : string, root : bool } -> Basis.t
 
   type opts = opt list

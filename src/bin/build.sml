@@ -34,7 +34,7 @@ if String.isSuffix "/" SML_LIB then
 else
   ();
 
-PolyML.use (libDir ^ "/build.sml");
+use (libDir ^ "/build.sml");
 
 eval ("HashArray.update (PolyMLB.pathMap, \"SML_LIB\", \"" ^ SML_LIB ^ "\")");
 

@@ -16,10 +16,10 @@ in options and return an `Ok | Error` value. On the other hand, `use` does not
 take in options and has type `string -> unit`; in case of error, it prints the
 error to stdout and raises an exception.
 
-The library can be iomport by calling `use` with the `build.sml` file in
+The library can be imported by calling `use` with the `build.sml` file in
 `src/lib`, though SML_LIB is not set by default. Once it has been successfully
 compiled, MLB based libraries may be imported by making use of the above
-functions. Default path variables are stored in the `PolyML.pathMap` map, which
+functions. Default path variables are stored in the `PolyMLB.pathMap` map, which
 is publicly accessible and modifiable.
 
     > PolyML.use "path/to/polymlb/sources/build.sml";
@@ -44,11 +44,12 @@ avoid catastrophic failure.
 
 The exposed inner modules are as follows:
 
-- Ann, annotations utilites;
+- Ann, annotations utilities;
 - Basis, mlb validation and conversion from parse results;
 - Compile, mlb compilation;
 - Dag, mlb graph processing and validation;
-- Lex, mlb lexing utilies;
+- Lex, mlb lexing utilities;
+- Log, logging utilities;
 - NameSpace, result of mlb compilation;
 - Parse, mlb parsing;
 - Path, path validation.
@@ -137,13 +138,13 @@ are compiled in this order:
 
 1. root.mlb
    1. basis.mlb
-   3. b.mlb
-      2. a.sml
-      3. b.sml
-   2. c.sml
-   3. a.mlb
+   2. b.mlb
       1. a.sml
-   3. main.sml
+      2. b.sml
+   3. c.sml
+   4. a.mlb
+      1. a.sml
+   5. main.sml
 
 It is possible to force all "dependencies" of an mlb file to be fully elaborated
 before said mlb file is processed. The above mlb files could then be compiled as

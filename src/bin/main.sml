@@ -364,7 +364,7 @@ in
         die ("error: cannot export '" ^ root ^ "': value has not been declared")
     | SOME mainFn =>
         let
-          val str = TIO.openString ("val _ = export (\"" ^ out ^ "\", main)")
+          val str = TIO.openString ("export (\"" ^ out ^ "\", main);")
           val P.NameSpace.N (_, ns') = P.NameSpace.empty ()
         in
           #enterVal ns' ("main", mainFn);
