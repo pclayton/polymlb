@@ -292,7 +292,7 @@ struct
       cont (compileBas log copts NONE r b)
     end
 
-  fun parDeps (jobs, log, copts) ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
+  fun parDeps jobs (log, copts) ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
     let
       val counts : (M.mutex * int ref) H.hash = H.hash 10
       val nss : NS.t H.hash = H.hash (order * 5 div 4)
@@ -348,7 +348,7 @@ struct
       | SOME e => raise e
     end
 
-  fun parConc (jobs, log, copts) ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
+  fun parConc jobs (log, copts) ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
     let
       type c = int * (int * string) cont
       val sz = order * 5 div 4
@@ -419,9 +419,9 @@ struct
       Int.min (j, Thread.Thread.numProcessors ())
 
   fun compile log { copts, depsFirst, jobs } =
-    case (numJobs jobs, depsFirst) of
-      (1, true) => serialDeps (log, copts)
-    | (1, _)    => serialEncounter (log, copts)
-    | (n, true) => parDeps (n, log, copts)
-    | (n, _)    => parConc (n, log, copts)
+    (case (numJobs jobs, depsFirst) of
+      (1, true) => serialDeps
+    | (1, _)    => serialEncounter
+    | (n, true) => parDeps n
+    | (n, _)    => parConc n) (log, copts)
 end
