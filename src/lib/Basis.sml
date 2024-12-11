@@ -177,7 +177,7 @@ struct
                 | SOME (SML, p) => SourceFile p :: ds)
             | dec ((P.Ann (l, ds'), loc), ds) =
                 (case annCheck (l, disabledAnns, badAnn logger, loc) of
-                  ([], p) => conv (p @ ignored) ds' @ ds
+                  ([], _) => L.foldl dec ds ds'
                 | (l, p) =>
                     if Ann.exists Ann.Discard l then
                       ds
