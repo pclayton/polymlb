@@ -205,7 +205,7 @@ struct
                   SOME _ =>
                     (case index (ps, p) of
                       ~1 => ()
-                    | i => raise (Dag o Cycle) (p :: L.take (ps, i)))
+                    | i => raise (Dag o Cycle) (p :: (rev o L.take) (ps, i)))
                 | NONE =>
                     let
                       val ds' = getBas p
