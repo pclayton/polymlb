@@ -112,7 +112,7 @@ struct
         | Compilation k =>
             cat
               [ case k of
-                  Compile.Compilation (_, at) => loc2s at
+                  Compile.Compilation (_, at) => loc2s at ^ ": "
                 | Compile.Execution (f, _) => fmt f ^ " "
                 | _ => ""
               , "error: aborted compilation:\n"
