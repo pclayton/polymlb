@@ -14,6 +14,8 @@ sig
   val exists : t -> t list -> bool
 
   val parse : string -> t option
+
+  val parseName : string -> t option
 end =
 struct
   structure O  = Option
@@ -46,14 +48,18 @@ struct
         (SS.string p, (SS.string o SS.triml 1) a)
     end
 
-  fun ann (_, "debug", v) = O.map Debug (Bool.fromString v)
-    | ann (_, "discard", "") = SOME Discard
-    | ann (_, "ignoreFiles", v) =
+  fun ann (_, "debug", SOME v) = O.map Debug (Bool.fromString v)
+    | ann (_, "debug", _) = SOME (Debug false)
+    | ann (_, "discard", SOME "") = SOME Discard
+    | ann (_, "discard", _) = SOME Discard
+    | ann (_, "ignoreFiles", SOME v) =
         ( O.map IgnoreFiles
         o O.filter (not o List.null)
         o S.tokens (fn c => c = #",")
         ) v
-    | ann (true, "importAll", "") = SOME ImportAll
+    | ann (_, "ignoreFiles", _) = SOME (IgnoreFiles [])
+    | ann (true, "importAll", SOME "") = SOME ImportAll
+    | ann (true, "importAll", _) = SOME ImportAll
     | ann _ = NONE
 
   fun parse s =
@@ -62,8 +68,14 @@ struct
         SS.splitl (not o Char.isSpace) ((trimWS o SS.full) s)
     in
       case prefix a of
-        ("", a) => ann (false, a, (SS.string o trimWS) v)
-      | ("poly", a) => ann (true, a, (SS.string o trimWS) v)
+        ("", a) => ann (false, a, (SOME o SS.string o trimWS) v)
+      | ("poly", a) => ann (true, a, (SOME o SS.string o trimWS) v)
       | _ => NONE
     end
+
+  fun parseName s =
+    case prefix (SS.full s) of
+      ("", a) => ann (false, a, NONE)
+    | ("poly", a) => ann (true, a, NONE)
+    | _ => NONE
 end

@@ -12,6 +12,7 @@ type opts =
   { cmd      : cmd
   , defAnns  : P.Ann.t list
   , depsf    : bool
+  , disAnns  : P.Ann.t list
   , file     : string
   , jobs     : int
   , main     : string
@@ -60,6 +61,7 @@ local
 , "   -default-ann <ann>             Set annotation default"
 , "   -deps-first                    Ensure MLB files will only be compiled after"
 , "                                  their dependencies"
+, "   -disable-ann <ann>             Disable the given annotation"
 , "-h -help                          Print help usage"
 , "   -info                          Print advanced information"
 , "   -ignore-call-main              Equivalent to -ann 'ignoreFiles call-main.sml'"
@@ -100,6 +102,7 @@ local
     { cmd      = ref CompileLink
     , defAnns  = ref ([] : P.Ann.t list)
     , depsf    = ref false
+    , disAnns  = ref ([] : P.Ann.t list)
     , file     = ref ""
     , jobs     = ref 1
     , main     = ref "main"
@@ -159,9 +162,9 @@ local
           xs before f () before TIO.closeIn s
         end
 
-  fun ann (_, s) [] = req s
-    | ann (field, s) (x::xs) =
-        case P.Ann.parse x of
+  fun ann (_, _, s) [] = req s
+    | ann (field, b, s) (x::xs) =
+        case (if b then P.Ann.parse else P.Ann.parseName) x of
           NONE => inv (s, x)
         | SOME a => xs before field d := a :: !(field d)
 
@@ -181,10 +184,11 @@ in
             ( l := xs
             ; case x of
                 "--" => ((#file d := hd xs) handle Empty => usage ())
-              | "-ann" => l := ann (#rootAnns, "-ann") xs
+              | "-ann" => l := ann (#rootAnns, true, "-ann") xs
               | "-c" => #cmd d := Compile
-              | "-default-ann" => l := ann (#defAnns, "default-ann") xs
+              | "-default-ann" => l := ann (#defAnns, true, "default-ann") xs
               | "-deps-first" => #depsf d := true
+              | "-disable-ann" => l := ann (#disAnns, false, "disable-ann") xs
               | "-h" => help ()
               | "-help" => help ()
               | "-info" => info ()
@@ -234,6 +238,7 @@ in
         { cmd      = !(#cmd d)
         , defAnns  = !(#defAnns d)
         , depsf    = !(#depsf d)
+        , disAnns  = !(#disAnns d)
         , file     = !(#file d)
         , jobs     = !(#jobs d)
         , main     = !(#main d)
@@ -312,11 +317,12 @@ local
         p
     end
 
-  fun o2o ({ defAnns, depsf, jobs, pathMap, quiet, rootAnns, verbose, ... } : opts) =
+  fun o2o ({ defAnns, depsf, disAnns, jobs, pathMap, quiet, rootAnns, verbose, ... } : opts) =
     let
       val l =
         [ P.PathMap pathMap
         , P.CompileOpts { jobs = jobs, depsFirst = depsf, copts = [] }
+        , P.DisabledAnns disAnns
         ]
       val l =
         if quiet then
