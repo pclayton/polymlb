@@ -11,6 +11,8 @@ sml: $(SML)
 $(SML):
 	echo 'use "test.sml"; use "$@";' | poly --error-exit > /dev/null
 
+repos: $(REPOS)
+
 # requires gmake
 $(REPOS):
 	[ -d "$(REPOS_DIR)/$(@F:.t=)" ] || { \
