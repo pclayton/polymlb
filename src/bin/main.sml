@@ -9,8 +9,8 @@ structure TIO = TextIO
 datatype cmd = CompileLink | Compile | SmlLib
 
 type opts =
-  { anns     : P.Ann.t list
-  , cmd      : cmd
+  { cmd      : cmd
+  , defAnns  : P.Ann.t list
   , depsf    : bool
   , file     : string
   , jobs     : int
@@ -20,6 +20,7 @@ type opts =
   , polyc    : string
   , pSuccess : bool
   , quiet    : bool
+  , rootAnns : P.Ann.t list
   , verbose  : int
   }
 
@@ -56,6 +57,7 @@ local
 , "OPTIONS"
 , "   -ann <ann>                     Wrap FILE with the given annotation"
 , "-c -compile                       Compile but do not link"
+, "   -default-ann <ann>             Set annotation default"
 , "   -deps-first                    Ensure MLB files will only be compiled after"
 , "                                  their dependencies"
 , "-h -help                          Print help usage"
@@ -95,8 +97,8 @@ local
   end
 
   val d =
-    { anns     = ref ([] : P.Ann.t list)
-    , cmd      = ref CompileLink
+    { cmd      = ref CompileLink
+    , defAnns  = ref ([] : P.Ann.t list)
     , depsf    = ref false
     , file     = ref ""
     , jobs     = ref 1
@@ -106,6 +108,7 @@ local
     , polyc    = ref "polyc"
     , pSuccess = ref false
     , quiet    = ref false
+    , rootAnns = ref ([] : P.Ann.t list)
     , verbose  = ref 0
     }
 
@@ -156,11 +159,11 @@ local
           xs before f () before TIO.closeIn s
         end
 
-  fun ann [] = req "-ann"
-    | ann (x::xs) =
+  fun ann (_, s) [] = req s
+    | ann (field, s) (x::xs) =
         case P.Ann.parse x of
-          NONE => inv ("-ann", x)
-        | SOME a => xs before #anns d := a :: !(#anns d)
+          NONE => inv (s, x)
+        | SOME a => xs before field d := a :: !(field d)
 
   fun posInt s =
     case Int.fromString s of
@@ -178,16 +181,19 @@ in
             ( l := xs
             ; case x of
                 "--" => ((#file d := hd xs) handle Empty => usage ())
-              | "-ann" => l := ann xs
+              | "-ann" => l := ann (#rootAnns, "-ann") xs
               | "-c" => #cmd d := Compile
+              | "-default-ann" => l := ann (#defAnns, "default-ann") xs
               | "-deps-first" => #depsf d := true
               | "-h" => help ()
               | "-help" => help ()
               | "-info" => info ()
               | "-ignore-call-main" =>
-                  #anns d := P.Ann.IgnoreFiles ["call-main.sml"] :: !(#anns d)
+                  #rootAnns d := P.Ann.IgnoreFiles ["call-main.sml"]
+                  :: !(#rootAnns d)
               | "-ignore-main" =>
-                  #anns d := P.Ann.IgnoreFiles ["main.sml"] :: !(#anns d)
+                  #rootAnns d := P.Ann.IgnoreFiles ["main.sml"]
+                  :: !(#rootAnns d)
               | "-jobs" => l := set (xs, "-jobs", #jobs, posInt)
               | "-main" => l := set (xs, "-main", #main, SOME)
               | "-mlb-path-map" => l := map xs
@@ -225,8 +231,8 @@ in
           !(#out d)
 
       val opts as { file, ... } : opts =
-        { anns     = !(#anns d)
-        , cmd      = !(#cmd d)
+        { cmd      = !(#cmd d)
+        , defAnns  = !(#defAnns d)
         , depsf    = !(#depsf d)
         , file     = !(#file d)
         , jobs     = !(#jobs d)
@@ -236,6 +242,7 @@ in
         , polyc    = !(#polyc d)
         , pSuccess = !(#pSuccess d)
         , quiet    = !(#quiet d)
+        , rootAnns = !(#rootAnns d)
         , verbose  = !(#verbose d)
         }
     in
@@ -305,7 +312,7 @@ local
         p
     end
 
-  fun o2o ({ anns, depsf, jobs, pathMap, quiet, verbose, ... } : opts) =
+  fun o2o ({ defAnns, depsf, jobs, pathMap, quiet, rootAnns, verbose, ... } : opts) =
     let
       val l =
         [ P.PathMap pathMap
@@ -317,13 +324,16 @@ local
         else
           P.Logger { pathFmt = fmt, print = log verbose } :: l
       val l =
-        if List.null anns then
-          l
-        else
-          P.Preprocess
-            (fn { bas, root = true, ... } => [P.Basis.Ann (anns, bas)]
-              | { bas, ... } => bas)
-          :: l
+        P.Preprocess
+          (fn { bas, root = true, ... } =>
+              let
+                val anns = defAnns @ rootAnns
+              in
+                if null anns then bas else [P.Basis.Ann (defAnns @ anns, bas)]
+              end
+            | { bas, ... } =>
+              if null defAnns then bas else [P.Basis.Ann (defAnns, bas)])
+        :: l
     in
       l
     end

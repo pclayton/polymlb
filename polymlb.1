@@ -1,4 +1,4 @@
-.Dd $Mdocdate: November 01 2024 $
+.Dd $Mdocdate: December 11 2024 $
 .Dt POLYMLB 1
 .Os
 .Sh NAME
@@ -26,10 +26,17 @@ be a top level value that matches the following spec:
 .It Fl ann Ar ann
 Wrap
 .Ar FILE
-with the given annotation. Use multiple times for multiple annotations. See
+with the given annotation, in addition to those from
+.Fl default-ann .
+Use multiple times for multiple annotations. See
 .Sx ANNOTATIONS .
 .It Fl c, Fl compile
 Compile but do not link.
+.It Fl default-ann Ar ann
+Set default value for the given annotation; i.e wrap all MLB files with
+.Ar ann .
+See
+.Sx ANNOTATIONS .
 .It Fl deps-first
 Compile MLB files only after their dependencies. See
 .Sx ELABORATION .
