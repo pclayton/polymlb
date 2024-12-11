@@ -1,9 +1,15 @@
 POLYMLB   != realpath ../polymlb
 
+SML       != ls sml/*.sml
 REPOS     != ls repos/*.t
 REPOS_DIR := repos/r
 
-all: $(REPOS)
+all: sml
+
+sml: $(SML)
+
+$(SML):
+	echo 'use "test.sml"; use "$@";' | poly --error-exit > /dev/null
 
 # requires gmake
 $(REPOS):
@@ -18,4 +24,4 @@ $(REPOS):
 clean:
 	rm -rf $(REPOS_DIR)
 
-.PHONY: $(REPOS) all clean
+.PHONY: $(SML) $(REPOS) all clean
