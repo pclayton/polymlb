@@ -121,7 +121,6 @@ struct
                 | Compile.Dependency s => "Dependency invariant violated: " ^ s
                 | Compile.Execution (_, e) =>
                     "raised during execution: " ^ exnMessage e
-                | Compile.NoSuchMLB s => "no such mlb: " ^ s
                 | Compile.UnboundId s => "unbound id: " ^ s
               ]
         | Exn e => "error: " ^ exnMessage e

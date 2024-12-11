@@ -5,7 +5,6 @@ sig
   | Dependency  of string (* depsFirst invariant violated; means bad input *)
   | Execution   of string * exn
   | UnboundId   of string
-  | NoSuchMLB   of string
 
   exception Compile of err
 
@@ -41,7 +40,6 @@ struct
   | Dependency  of string
   | Execution   of string * exn
   | UnboundId   of string
-  | NoSuchMLB   of string
 
   exception Compile of err
 
