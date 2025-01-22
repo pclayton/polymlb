@@ -234,7 +234,12 @@ struct
     let
       val sz = S.size w
     in
-      if sz <= SS.size ss andalso (SS.string o SS.slice) (ss, 0, SOME sz) = w then
+      if
+        (sz = SS.size ss orelse
+        (sz < SS.size ss andalso (Char.isSpace o SS.sub) (ss, sz)))
+      andalso
+        (SS.string o SS.slice) (ss, 0, SOME sz) = w
+      then
         SOME
           ((), mkLoc (s, l, c, l, c + sz), drop (s, l, c + sz, SS.triml sz ss))
       else
