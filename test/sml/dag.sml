@@ -27,9 +27,9 @@ in
 end
 
 local
-  structure V = Vector
-  val v = V.tabulate (4, fn _ => ref 0)
-  fun ++ i = V.sub (v, i) := !(V.sub (v, i)) + 1
+  structure A = Array
+  val a = A.tabulate (4, fn _ => 0)
+  fun ++ i = A.update (a, i, A.sub (a, i) + 1)
 
   val b1 = [BasisFile "b2", BasisFile "b3", BasisFile "b4"]
   val b2 = [BasisFile "b3", BasisFile "b4"]
@@ -47,7 +47,7 @@ in
   assert
     process b "b1"
   is
-    (fn _ => V.foldl (fn (r, b) => b andalso !r = 1) true v)
+    (fn _ => A.foldl (fn (r, b) => b andalso r = 1) true a)
 end
 
 local

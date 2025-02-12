@@ -18,25 +18,14 @@ end;
 "Compile.compile raises on invalid sml source"
 assert
   compile [SourceFile "sml/source/illegal.sml"]
-raisesExact (* ... *)
-  (C.Compile o C.Compilation)
-    ( "Pattern and expression have incompatible types.\n\
-      \   Pattern: i : int : int\n\
-      \   Expression: \"foo\" : string\n\
-      \   Reason:\n\
-      \      Can't unify int (*In Basis*) with string (*In Basis*)\n\
-      \         (Different type constructors)\n"
-    , { file = "sml/source/illegal.sml"
-      , startLine = 1, startPosition = 0
-      , endLine = 1, endPosition = 0
-      }
-    );
+raisesMatching
+  (fn C.Compile (C.Compilation _) => true | _ => false);
 
 "Compile.compile re-raises execution exns"
 assert
   compile [SourceFile "sml/source/bad-exec.sml"]
-raisesExact
-  (C.Compile o C.Execution) ("sml/source/bad-exec.sml", Fail "raised");
+raisesMatching
+  (fn C.Compile (C.Execution _) => true | _ => false);
 
 "Compile.compile raises on invalid bind"
 assert

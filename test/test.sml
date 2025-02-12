@@ -11,6 +11,7 @@ sig
   val is : 'a t * ('a -> bool) -> unit
   val matches : 'a t * (('a * 'a -> bool) * 'a) -> unit
   val raises : (unit -> 'a) t * exn -> unit
+  val raisesMatching : (unit -> 'a) t * (exn -> bool) -> unit
   val raisesExact : (unit -> 'a) t * exn -> unit
 end =
 struct
@@ -33,10 +34,14 @@ struct
     (f (); fail s)
     handle e' => if exnName e = exnName e' then () else fail s
 
+  fun raisesMatching ((s, f), e) =
+    (f (); fail s)
+    handle e' => if e e' then () else fail s
+
   fun raisesExact ((s, f), e) =
     (f (); fail s)
     handle e' => if exnMessage e = exnMessage e' then () else fail s
 end
 
-infix assert eq is matches raises raisesExact
+infix assert eq is matches raises raisesMatching raisesExact
 open Test
