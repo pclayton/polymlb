@@ -187,8 +187,8 @@ end
  * node is found, then its count is decreased by 1 and the element is retrieved.
  * If the updated count is zero, then the node is physically deleted from the
  * list.
- * Locking as well as capacity checks are implemented with a 64 bit bitset:
- * - the high 32 bits contain the capacity;
+ * Locking as well as capacity checks are implemented with a 63 bit bitset:
+ * - the high 31 bits contain the capacity;
  * - the low MAX bits are used to lock forward pointers
  *   (level n is considered to be locked if 1 << n is set)
  * - the MAX + 1 bit is the insertion/deletion bit (full node lock).
@@ -198,7 +198,7 @@ end
  *   https://dl.acm.org/doi/pdf/10.1145/78973.78977
  *)
 functor PrioFn (type elt) :> QUEUE
-  where type inc = int * elt and type outc = elt =
+  where type inc = FixedInt.int * elt and type outc = elt =
 struct
   structure A = Array
   structure C = Thread.ConditionVar
@@ -214,34 +214,34 @@ struct
    *)
   datatype t =
     N of
-      { p : int
+      { p : FixedInt.int
       , v : elt list ref
       , a : t array
       , m : M.mutex
       , c : C.conditionVar
-      , w : Word64.word ref
+      , w : Word.word ref
       }
 
   val MAX = 12
   val INS = MAX + 1
 
-  val `& = Word64.andb
-  val `| = Word64.orb
-  val `^ = Word64.xorb
-  val << = Word64.<<
-  val >> = Word64.>>
-  val `~ = Word64.notb (* /!\ *)
-  val  ~ = Word64.~    (* /!\ *)
+  val `& = Word.andb
+  val `| = Word.orb
+  val `^ = Word.xorb
+  val << = Word.<<
+  val >> = Word.>>
+  val `~ = Word.notb (* /!\ *)
+  val  ~ = Word.~    (* /!\ *)
 
   infix 8 `& `| `^ << >>
 
-  val LIM = (0w1 << 0w33) - 0w1
+  val LIM = (0w1 << 0w31) - 0w1
 
   (* Threadsafe biased RNG, 1/2 distribution from 1 to MAX.
    *
    * The generator used is xoroshiro128++, initially seeded with splitmix64;
    * generator state is thread local. Rather than the `while (rng () < 0.5) i++`
-   * in Pugh's paper, we generate 64 bits once and keep only the low MAX bits,
+   * in Pugh's paper, we generate 63 bits once and keep only the low MAX bits,
    * discarding the rest.
    *
    * see:
@@ -250,7 +250,7 @@ struct
    *   https://xorshift.di.unimi.it/splitmix64.c
    *)
   local
-    val t : (Word64.word ref * Word64.word ref) Universal.tag = Universal.tag ()
+    val t : (Word.word ref * Word.word ref) Universal.tag = Universal.tag ()
     structure T = Thread.Thread
 
     (* https://www.chessprogramming.org/Population_Count#The_PopCount_routine *)
@@ -280,19 +280,20 @@ struct
         r
       end
 
+    (* Adjusted constants to avoid overflows *)
     fun sm64 w =
       let
-        val _ = w := !w + 0wx9e3779b97f4a7c15
+        val _ = w := !w + 0wx4F1BBCDCBFA53E0B
         val w = !w
-        val w = (w `^ (w >> 0w30)) * 0wxbf58476d1ce4e5b9
-        val w = (w `^ (w >> 0w27)) * 0wx94d049bb133111eb
+        val w = (w `^ (w >> 0w30)) * 0wx5FAC23B68E7272DD
+        val w = (w `^ (w >> 0w27)) * 0wx4A6824DD899888F5
       in
         w `^ (w >> 0w31)
       end
 
     fun new () =
       let
-        val s = (ref o Word64.fromLargeInt o Time.toMicroseconds o Time.now) ()
+        val s = (ref o Word.fromLargeInt o Time.toMicroseconds o Time.now) ()
       in
         (ref (sm64 s), ref (sm64 s))
       end
@@ -306,18 +307,18 @@ struct
             SOME r => r
           | NONE => let val r = new () in T.setLocal (t, r); r end
       in
-        (Word64.toInt o ctz) (next r `& mask) + 1
+        (Word.toInt o ctz) (next r `& mask) + 1
       end
   end
 
- fun new () : t =
+  fun new () : t =
     let
       val tl =
-        N { p = valOf Int.minInt, v = ref [], a = A.fromList []
+        N { p = valOf FixedInt.minInt, v = ref [], a = A.fromList []
           , m = M.mutex (), c = C.conditionVar (), w = ref 0w0
           }
     in
-      N { p = valOf Int.maxInt, v = ref [], a = A.array (MAX, tl)
+      N { p = valOf FixedInt.maxInt, v = ref [], a = A.array (MAX, tl)
         , m = M.mutex (), c = C.conditionVar (), w = ref 0w0
         }
     end
@@ -327,8 +328,8 @@ struct
   fun getn (N { a, ... }, i) = A.sub (a, i)
 
   local
-    val min = valOf Int.minInt
-    val max = valOf Int.maxInt
+    val min = valOf FixedInt.minInt
+    val max = valOf FixedInt.maxInt
   in
     fun istl (N { p, ... }) = p = min
     fun ishd (N { p, ... }) = p = max
@@ -376,35 +377,42 @@ struct
 
   fun getLock { n, p, i } =
     let
-      val n1 = ref n
-      val n2 = (ref o getn) (n, i)
+      fun f1 (n1, n2) = if getp n2 < p then n1 else f1 (n2, getn (n1, i))
+
+      fun f2 (n1, n2) =
+        if getp n2 < p then
+          n1
+        else
+          (unlock (n1, i); lock (n2, i); f2 (n2, getn (n1, i)))
+
+      val n1 = f1 (n, getn (n, i))
     in
-      while getp (!n2) >= p do
-        (n1 := !n2; n2 := getn (!n1, i));
-      lock (!n1, i);
-      n2 := getn (!n1, i);
-      while getp (!n2) >= p do
-        (unlock (!n1, i); n1 := !n2; lock (!n1, i); n2 := getn (!n1, i));
-      !n1
+      lock (n1, i);
+      f2 (n1, getn (n1, i))
     end
 
-  fun preds (n, xp) =
-    let
-      val b = A.array (MAX, n)
-      val n1 = ref n
-      val n2 = ref n
-
-      fun f ~1 = ()
-        | f i =
-            ( while getp (!n2) >= xp do
-                (n1 := !n2; n2 := getn (!n1, i))
-            ; A.update (b, i, !n1)
-            ; f (i - 1)
-            )
-    in
-      f (MAX - 1);
-      (b, !n1)
-    end
+  local
+    fun fd (n1, n2, p, i) =
+      if getp n2 < p then
+        (n1, n2)
+      else
+        fd (n2, getn (n1, i), p, i)
+  in
+    fun preds (n, xp) =
+      let
+        val b = A.array (MAX, n)
+        fun f (~1, n1, _) = n1
+          | f (i, n1, n2) =
+              let
+                val (n1, n2) = fd (n1, n2, xp, i)
+              in
+                A.update (b, i, n1);
+                f (i - 1, n1, n2)
+              end
+      in
+        (b, f (MAX - 1, n, n))
+      end
+  end
 
   fun link { b, n' as N { a = a', p, ... }, n1 } =
     let
@@ -471,37 +479,46 @@ struct
 
   fun getLock { n, p, i, v } =
     let
-      val n1 = ref n
-      val n2 = (ref o getn) (n, i)
+      fun f1 (n1, n2) =
+        if getp n2 > p orelse (getp n2 = p andalso getv n2 <> v) then
+          f1 (n2, getn (n1, i))
+        else
+          n1
+
+      fun f2 (n1, n2) =
+        if getp n2 > p orelse (getp n2 = p andalso getv n2 <> v) then
+          (unlock (n1, i); lock (n2, i); f2 (n2, getn (n1, i)))
+        else
+          n1
+
+      val n1 = f1 (n, getn (n, i))
     in
-      while getp (!n2) > p orelse (getp (!n2) = p andalso getv (!n2) <> v) do
-        (n1 := !n2; n2 := getn (!n1, i));
-      lock (!n1, i);
-      n2 := getn (!n1, i);
-      while getp (!n2) > p orelse (getp (!n2) = p andalso getv (!n2) <> v) do
-        (unlock (!n1, i); n1 := !n2; lock (!n1, i); n2 := getn (!n1, i));
-      !n1
+      lock (n1, i);
+      f2 (n1, getn (n1, i))
     end
 
-  fun preds (n, xp, xv) =
-    let
-      val b = A.array (MAX, n)
-      val n1 = ref n
-      val n2 = ref n
-
-      fun f ~1 = ()
-        | f i =
-            ( while
-                getp (!n2) > xp orelse (getp (!n2) = xp andalso getv (!n2) <> xv)
-              do
-                (n1 := !n2; n2 := getn (!n1, i))
-            ; A.update (b, i, !n1)
-            ; f (i - 1)
-            )
-    in
-      f (MAX - 1);
-      (b, !n1)
-    end
+  local
+    fun fd (n1, n2, p, v, i) =
+      if getp n2 > p orelse (getp n2 = p andalso getv n2 <> v) then
+        fd (n2, getn (n1, i), p, v, i)
+      else
+        (n1, n2)
+  in
+    fun preds (n, xp, xv) =
+      let
+        val b = A.array (MAX, n)
+        fun f (~1, n1, _) = n1
+          | f (i, n1, n2) =
+              let
+                val (n1, n2) = fd (n1, n2, xp, xv, i)
+              in
+                A.update (b, i, n1);
+                f (i - 1, n1, n2)
+              end
+      in
+        (b, f (MAX - 1, n, n))
+      end
+  end
 
   fun find n =
     if istl n then
