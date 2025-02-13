@@ -1,11 +1,11 @@
 signature QUEUE =
 sig
   type t
-  type elt
+  type inc
+  type outc
   val new : unit -> t
-  val f   : elt -> (unit -> unit)
-  val enq : t * elt -> unit
-  val deq : t -> (unit -> unit) option
+  val enq : t * inc -> unit
+  val deq : t -> outc option
 end
 
 (* Simple bounded threadpool implementation with centralized task queue.
@@ -15,11 +15,15 @@ end
  * If a task fails (i.e raises an exception), threads are sent an interrupt and
  * will not process further tasks.
  *)
-functor TP (Q : QUEUE) :>
+functor TPFn (Q :
+  sig
+    include QUEUE where type outc = unit -> unit
+    val conv : inc -> outc
+  end) :>
 sig
   type t
   val new    : int -> t
-  val submit : t * Q.elt -> unit
+  val submit : t * Q.inc -> unit
   (* Blocks until all threads have terminated; either because the task queue
    * is empty or a task has failed, in which case the corresponding exn is
    * returned.
@@ -103,7 +107,7 @@ struct
       in
         cur := !cur + 1;
         A.update
-          (threads, i, (SOME o T.fork) (fn () => run (i, Q.f f, t), []));
+          (threads, i, (SOME o T.fork) (fn () => run (i, Q.conv f, t), []));
         M.unlock m
       end
 
@@ -121,11 +125,13 @@ end
  * see:
  *   https://www.cs.rochester.edu/~scott/papers/1996_PODC_queues.pdf
  *)
-structure Fifo :> QUEUE where type elt = unit -> unit =
+functor FifoFn (type elt) :> QUEUE
+  where type inc = elt and type outc = elt =
 struct
   structure M = Thread.Mutex
 
-  type elt = unit -> unit
+  type inc  = elt
+  type outc = elt
 
   datatype n = E | N of elt * n ref
 
@@ -135,8 +141,6 @@ struct
     , hm : M.mutex
     , tm : M.mutex
     }
-
-  fun f x = x
 
   fun new () =
     let
@@ -193,13 +197,15 @@ end
  *   https://people.csail.mit.edu/shanir/publications/Priority_Queues.pdf
  *   https://dl.acm.org/doi/pdf/10.1145/78973.78977
  *)
-structure Prio :> QUEUE where type elt = int * (unit -> unit) =
+functor PrioFn (type elt) :> QUEUE
+  where type inc = int * elt and type outc = elt =
 struct
   structure A = Array
   structure C = Thread.ConditionVar
   structure M = Thread.Mutex
 
-  type elt = int * (unit -> unit)
+  type inc  = int * elt
+  type outc = elt
 
   (* The tail node is a regular node that has a piority of Int.minInt; this
    * makes the overall code much cleaner since we can just check priorities
@@ -209,14 +215,12 @@ struct
   datatype t =
     N of
       { p : int
-      , v : (unit -> unit) list ref
+      , v : elt list ref
       , a : t array
       , m : M.mutex
       , c : C.conditionVar
       , w : Word64.word ref
       }
-
-  fun f (_, x) = x
 
   val MAX = 12
   val INS = MAX + 1
@@ -557,7 +561,12 @@ struct
 end
 
 structure ThreadPool =
-struct
-  structure FTP = TP (Fifo)
-  structure PTP = TP (Prio)
+let
+  structure Fifo = FifoFn (type elt = unit -> unit)
+  structure Prio = PrioFn (type elt = unit -> unit)
+in
+  struct
+    structure FTP = TPFn (struct open Fifo fun conv x = x end)
+    structure PTP = TPFn (struct open Prio fun conv (_, x) = x end)
+  end
 end
