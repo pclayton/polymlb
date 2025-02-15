@@ -302,10 +302,10 @@ local
   structure P = PolyMLB
   datatype z = datatype P.Log.level
 
-  fun log v (Trace, m) = if v > 2 then println m else ()
-    | log v (Debug, m) = if v > 1 then println m else ()
-    | log v (Info, m) = if v > 0 then println m else ()
-    | log _ (_, m) = println m
+  fun log v (Trace, m) = if v > 2 then println (m ()) else ()
+    | log v (Debug, m) = if v > 1 then println (m ()) else ()
+    | log v (Info,  m) = if v > 0 then println (m ()) else ()
+    | log _ (_, m) = println (m ())
 
   fun fmt p =
     let

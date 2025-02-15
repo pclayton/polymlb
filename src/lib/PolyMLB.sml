@@ -144,7 +144,6 @@ struct
       end
 
     fun pp { bas : Basis.t, path = _ : string, root = _ : bool } = bas
-    val log = { pathFmt = fn z => z, print = fn _ => () }
   in
     fun doOpts opts =
       let
@@ -154,7 +153,7 @@ struct
         , conc     = fd (fn Concurrency z => SOME z | _ => NONE)
             { depsFirst = false, jobs = 1 }
         , dAnns    = fd (fn DisabledAnns l => SOME l | _ => NONE) []
-        , logger   = fd (fn Logger ff => SOME ff | _ => NONE) log
+        , logger   = fd (fn Logger l => SOME (SOME l) | _ => NONE) NONE
         , pathMap  = fd (fn PathMap m => SOME m | _ => NONE) (H.hash 1)
         , preproc  = fd (fn Preprocess f => SOME f | _ => NONE) pp
         }
@@ -164,7 +163,8 @@ struct
   fun doBasis f opts src =
     let
       val opts as { conc, logger, ... } = doOpts opts
-      val copts = { depsFirst = #depsFirst conc, jobs = #jobs conc }
+      val copts =
+        { depsFirst = #depsFirst conc, jobs = #jobs conc, logger = logger }
 
       val pathMap =
         let
@@ -177,9 +177,10 @@ struct
 
       fun convOpts p =
         { disabledAnns = #dAnns opts
+        , exts = NONE
+        , logger = logger
         , pathMap = pathMap
         , path = OSP.dir p
-        , exts = NONE
         }
 
       fun mkBas p =
@@ -188,15 +189,14 @@ struct
               #preproc opts { bas = b, path = p, root = true }
             else
               #preproc opts { bas = b, path = p, root = false })
-        o Basis.fromParse logger (convOpts p)
+        o Basis.fromParse (convOpts p)
         o Parse.parse { fileName = p, lineOffset = 0 }
         o readFile
         ) p
     in
-      (Ok o f (logger, copts) o Dag.process logger mkBas o OSF.fullPath) src
+      (Ok o f copts o Dag.process { logger = logger } mkBas o OSF.fullPath) src
       handle x =>
         let
-          val { pathFmt, print } = logger
           val err =
             case x of
               Parse.Parse z      => Parse z
@@ -205,12 +205,15 @@ struct
             | Compile.Compile z  => Compilation z
             | z                  => Exn z
         in
-          print (Log.Error, errToString pathFmt err);
+          Option.app
+            (fn { pathFmt, print } =>
+              print (Log.Error, fn () => errToString pathFmt err))
+            logger;
           Error err
         end
     end
 
-  fun compile opts = doBasis (fn (log, copts) => Compile.compile log copts) opts
+  fun compile opts = doBasis Compile.compile opts
 
   fun import opts src =
     case compile opts src of
@@ -219,8 +222,8 @@ struct
 
   local
     fun fmt p = OSP.mkRelative { path = p, relativeTo = (OSF.getDir ()) }
-    fun log (Log.Warn, m) = print ("warning: " ^ m ^ "\n")
-      | log (Log.Error, m) = print ("error" ^ m ^ "\n")
+    fun log (Log.Warn, m) = print ("warning: " ^ m () ^ "\n")
+      | log (Log.Error, m) = print ("error" ^ m () ^ "\n")
       | log _ = ()
   in
     fun use s =

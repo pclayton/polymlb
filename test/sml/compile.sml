@@ -3,17 +3,12 @@ structure N = PolyML.NameSpace
 
 datatype z = datatype PolyMLB.Basis.dec
 
-local
-  val log = { pathFmt = fn s => s, print = fn _ => () }
-in
-  fun compile b () = C.compile
-    log { copts = [], depsFirst = false, jobs = 0 }
-    (PolyMLB.Dag.process
-      log
-      (fn "root" => [Ann ([PolyMLB.Ann.ImportAll], b)]
-        | _ => raise Fail "")
-      "root")
-end;
+fun compile b () = C.compile
+  { depsFirst = false, jobs = 0, logger = NONE }
+  (PolyMLB.Dag.process { logger = NONE }
+    (fn "root" => [Ann ([PolyMLB.Ann.ImportAll], b)]
+      | _ => raise Fail "")
+    "root");
 
 "Compile.compile raises on invalid sml source"
 assert
@@ -33,17 +28,13 @@ assert
 raisesExact
   C.Compile (C.UnboundId "S2");
 
-local
-  val log = { pathFmt = fn s => s, print = fn _ => () }
-in
-  fun compile b = C.compile
-    log { copts = [], depsFirst = false, jobs = 0 }
-    (PolyMLB.Dag.process
-      log
-      (fn "root" => [Ann ([PolyMLB.Ann.ImportAll], b)]
-        | _ => raise Fail "")
-      "root")
-end;
+fun compile b = C.compile
+  { depsFirst = false, jobs = 0, logger = NONE }
+  (PolyMLB.Dag.process
+    { logger = NONE }
+    (fn "root" => [Ann ([PolyMLB.Ann.ImportAll], b)]
+      | _ => raise Fail "")
+    "root");
 
 "Compile.compile valid"
 assert

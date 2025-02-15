@@ -11,6 +11,7 @@ sig
   type opts =
     { depsFirst : bool
     , jobs      : int
+    , logger    : Log.logger option
     }
 
   (* Resolve and compile a list of declarations in a fresh env, triggering
@@ -19,7 +20,7 @@ sig
    * single job and depsFirst = false is guaranteed to be encounter order.
    * The logger may be called from different threads if multiple jobs.
    *)
-  val compile : Log.logger -> opts -> Dag.t -> NameSpace.t
+  val compile : opts -> Dag.t -> NameSpace.t
 end =
 struct
   structure D    = Dag
@@ -45,12 +46,13 @@ struct
   type opts =
     { depsFirst : bool
     , jobs      : int
+    , logger    : Log.logger option
     }
 
   datatype 'a r = Done of 'a * NS.t | Cont of 'a * string * 'a cont
   withtype 'a cont = NS.t -> 'a r
 
-  fun compileSML { pathFmt, print } (ns, path, opts) =
+  fun compileSML log (ns, path, opts) =
     let
       val msg = ref ([] : string list)
       val loc = ref
@@ -65,14 +67,19 @@ struct
           ; loc := location
           )
         else
-          let
-            val m = ref ([] : string list)
-          in
-            P.prettyPrint (fn s => m := s :: !m, 80) message;
-            print (Log.Warn,
-                Log.locFmt pathFmt location ^ ": "
-              ^ (String.concat o List.rev o !) m)
-          end
+          case log of
+            NONE => ()
+          | SOME { pathFmt, print } =>
+              let
+                val m = ref ([] : string list)
+              in
+                P.prettyPrint (fn s => m := s :: !m, 80) message;
+                print
+                  ( Log.Warn
+                  , fn () => String.concat
+                      (Log.locFmt pathFmt location :: ": " :: List.rev (!m))
+                  )
+              end
 
       val s = (ref o TIO.getInstream o TIO.openIn) path
       val l = ref 1
@@ -128,7 +135,7 @@ struct
     datatype z = datatype Basis.dec
     datatype z = datatype Basis.exp
   in
-    fun compileBas (log as { pathFmt, print }) ns ret ds =
+    fun compileBas log ns ret ds =
       let
         fun elab (opts, ign) (ns as NS.N (bns, pns), ds, cont) =
           let
@@ -148,7 +155,10 @@ struct
                   if isIgnored (ign, p) then
                     dec ds
                   else
-                    ( print (Log.Debug, "compiling " ^ pathFmt p)
+                    ( case log of
+                        NONE => ()
+                      | SOME { pathFmt, print } =>
+                          print (Log.Debug, fn () => "compiling " ^ pathFmt p)
                     ; compileSML log (pns, p, opts)
                     ; dec ds
                     )
@@ -236,8 +246,9 @@ struct
       end
   end
 
-  fun logElab { pathFmt, print } p =
-    print (Log.Info, "elaborating " ^ pathFmt p)
+  fun logElab NONE _ = ()
+    | logElab (SOME { pathFmt, print }) p =
+        print (Log.Info, fn () => "elaborating " ^ pathFmt p)
 
   fun serialDeps log ({ root as D.N (r, _, _), order, ... } : D.t) =
     let
@@ -414,10 +425,10 @@ struct
     else
       Int.min (j, Thread.Thread.numProcessors ())
 
-  fun compile log { depsFirst, jobs } =
+  fun compile { depsFirst, jobs, logger } =
     (case (numJobs jobs, depsFirst) of
       (1, true) => serialDeps
     | (1, _)    => serialEncounter
     | (n, true) => parDeps n
-    | (n, _)    => parConc n) log
+    | (n, _)    => parConc n) logger
 end

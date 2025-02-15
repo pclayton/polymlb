@@ -29,13 +29,14 @@ sig
 
   type opts =
     { disabledAnns : Ann.t list
-    , pathMap : string HashArray.hash
-    (* absolute path to a directory from which to resolve relative paths *)
-    , path : string
     (* for SML source files only, replaces default.
      * ["sml", "ml", "sig", "fun"]
      *)
-    , exts : string list option
+    , exts         : string list option
+    , logger       : Log.logger option
+    , pathMap      : string HashArray.hash
+    (* absolute path to a directory from which to resolve relative paths *)
+    , path         : string
     }
 
   datatype err_kind = DuplicateBind | Extension | UnboundVariable
@@ -56,7 +57,7 @@ sig
    * - operation lists are inlined, e.g `open bas1 bas2` or
    *   `structure S1 = S2 and S3 = S4` become two disctint declarations
    *)
-  val fromParse : Log.logger -> opts -> Parse.t -> t
+  val fromParse : opts -> Parse.t -> t
 end =
 struct
   structure CV = CharVector
@@ -85,9 +86,10 @@ struct
 
   type opts =
     { disabledAnns : Ann.t list
-    , pathMap : string HashArray.hash
-    , path : string
-    , exts : string list option
+    , exts         : string list option
+    , logger       : Log.logger option
+    , pathMap      : string HashArray.hash
+    , path         : string
     }
 
   datatype err_kind = DuplicateBind | Extension | UnboundVariable
@@ -139,11 +141,13 @@ struct
           (x1::xs, f (x1, x2) :: r))
       ([], []) l)
 
-  fun badAnn { pathFmt, print } (a, loc) =
-    print
-      ( Log.Warn
-      , S.concat [Log.locFmt pathFmt loc, ": unrecognized annotation '", a, "'"]
-      )
+  fun badAnn NONE _ = ()
+    | badAnn (SOME { pathFmt, print }) (a, loc) =
+        print
+          ( Log.Warn
+          , fn () => S.concat
+              [Log.locFmt pathFmt loc, ": unrecognized annotation '", a, "'"]
+          )
 
   fun annCheck (xs, dis, cb, loc) =
     let
@@ -162,7 +166,7 @@ struct
       f (xs, [], [])
     end
 
-  fun fromParse logger { disabledAnns, pathMap, path, exts } =
+  fun fromParse { disabledAnns, logger, pathMap, path, exts } =
     let
       fun conv ignored ds =
         let

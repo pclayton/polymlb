@@ -13,6 +13,10 @@ sig
 
   exception Dag of err
 
+  type opts =
+    { logger : Log.logger option
+    }
+
   (* Traverse and reduce to a minimal equivalent the DAG formed by having the
    * given basis as root and all other bases which are transitively reachable
    * through basis file imports.
@@ -22,7 +26,7 @@ sig
    * The given function takes in the absolute path of an mlb file and must
    * return its content.
    *)
-  val process : Log.logger -> (string -> Basis.t) -> string -> t
+  val process : opts -> (string -> Basis.t) -> string -> t
 end =
 struct
   structure H = HashArray
@@ -48,6 +52,10 @@ struct
   datatype err = Cycle of string list
 
   exception Dag of err
+
+  type opts =
+    { logger : Log.logger option
+    }
 
   fun hsub z = Option.valOf (H.sub z)
 
@@ -380,15 +388,20 @@ struct
       }
     end
 
-  fun process { pathFmt, print } f s =
+  fun process { logger } f s =
     let
-      fun p m = print (Log.Debug, m)
-      val f = fn s => (p ("parsing " ^ pathFmt s); f s)
-      fun (m @ f) z = (p m; f z)
+      val (log, parse) =
+        case logger of
+          NONE => (fn _ => (), f)
+        | SOME { pathFmt, print} =>
+            ( fn m => print (Log.Debug, fn () => m)
+            , fn s => (print (Log.Debug, fn () => "parsing " ^ pathFmt s); f s)
+            )
+      fun (m @ f) z = (log m; f z)
     in
       ( "building MLB graph"   @ mkDag
       o "reducing MLB graph"   @ reduce
-      o "traversing MLB graph" @ traverse f
+      o "traversing MLB graph" @ traverse parse
       ) s
     end
 end

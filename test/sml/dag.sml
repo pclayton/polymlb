@@ -4,7 +4,7 @@ structure D = PolyMLB.Dag
 datatype z = datatype PolyMLB.Basis.dec
 datatype z = datatype PolyMLB.Basis.exp
 
-val process = D.process { pathFmt = fn s => s, print = fn _ => () }
+val process = D.process { logger = NONE }
 
 local
   val b1 = [BasisFile "b2", BasisFile "b3"]

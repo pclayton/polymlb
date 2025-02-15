@@ -12,8 +12,7 @@ val loc =
   }
 
 fun fromParse p () = B.fromParse
-  { pathFmt = fn s => s, print = fn _ => () }
-  { disabledAnns = [], pathMap = pmap, path = "/", exts = NONE }
+  { disabledAnns = [], pathMap = pmap, path = "/", exts = NONE, logger = NONE }
   p;
 
 "Basis.fromParse raises on duplicate bind"
@@ -41,8 +40,7 @@ raisesExact
   B.Validation (B.UnboundVariable, "FOO", loc);
 
 fun fromParse p = B.fromParse
-  { pathFmt = fn s => s, print = fn _ => () }
-  { disabledAnns = [], pathMap = pmap, path = "/", exts = NONE }
+  { disabledAnns = [], pathMap = pmap, path = "/", exts = NONE, logger = NONE }
   p;
 
 "Basis.fromParse valid"
@@ -97,8 +95,7 @@ eq
   [B.Structure ("s1", "s1"), B.Structure ("s2", "s2")];
 
 fun fromParse l p = B.fromParse
-  { pathFmt = fn s => s, print = fn _ => () }
-  { disabledAnns = l, pathMap = pmap, path = "/", exts = NONE }
+  { disabledAnns = l, pathMap = pmap, path = "/", exts = NONE, logger = NONE }
   p;
 
 "Basis.fromParse removes disabled annotations"
