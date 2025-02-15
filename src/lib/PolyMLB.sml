@@ -2,7 +2,7 @@ structure PolyMLB :
 sig
   datatype opt =
     AnnDefaults of Ann.t list
-  | CompileOpts of Compile.opts
+  | Concurrency of { depsFirst : bool, jobs : int }
     (* dummy values can be used; the anns will be completely disabled *)
   | DisabledAnns of Ann.t list
   | Logger of Log.logger
@@ -44,7 +44,7 @@ struct
 
   datatype opt =
     AnnDefaults of Ann.t list
-  | CompileOpts of Compile.opts
+  | Concurrency of { depsFirst : bool, jobs : int }
   | DisabledAnns of Ann.t list
   | Logger of Log.logger
   | PathMap of string HashArray.hash
@@ -146,16 +146,13 @@ struct
     fun pp { bas : Basis.t, path = _ : string, root = _ : bool } = bas
     val log = { pathFmt = fn z => z, print = fn _ => () }
   in
-    fun getCopts opts =
-      find
-        (fn CompileOpts c => SOME c | _ => NONE)
-        opts { jobs = 1, depsFirst = false, copts = [] }
-
     fun doOpts opts =
       let
         fun fd f v = find f opts v
       in
         { anns     = fd (fn AnnDefaults l => SOME l | _ => NONE) []
+        , conc     = fd (fn Concurrency z => SOME z | _ => NONE)
+            { depsFirst = false, jobs = 1 }
         , dAnns    = fd (fn DisabledAnns l => SOME l | _ => NONE) []
         , logger   = fd (fn Logger ff => SOME ff | _ => NONE) log
         , pathMap  = fd (fn PathMap m => SOME m | _ => NONE) (H.hash 1)
@@ -166,7 +163,8 @@ struct
 
   fun doBasis f opts src =
     let
-      val opts as { logger, ... } = doOpts opts
+      val opts as { conc, logger, ... } = doOpts opts
+      val copts = { depsFirst = #depsFirst conc, jobs = #jobs conc }
 
       val pathMap =
         let
@@ -195,7 +193,7 @@ struct
         o readFile
         ) p
     in
-      (Ok o f logger o Dag.process logger mkBas o OSF.fullPath) src
+      (Ok o f (logger, copts) o Dag.process logger mkBas o OSF.fullPath) src
       handle x =>
         let
           val { pathFmt, print } = logger
@@ -212,7 +210,7 @@ struct
         end
     end
 
-  fun compile opts = doBasis (fn f => Compile.compile f (getCopts opts)) opts
+  fun compile opts = doBasis (fn (log, copts) => Compile.compile log copts) opts
 
   fun import opts src =
     case compile opts src of

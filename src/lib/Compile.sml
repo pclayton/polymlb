@@ -9,8 +9,7 @@ sig
   exception Compile of err
 
   type opts =
-    { copts     : PolyML.Compiler.compilerParameters list
-    , depsFirst : bool
+    { depsFirst : bool
     , jobs      : int
     }
 
@@ -44,8 +43,7 @@ struct
   exception Compile of err
 
   type opts =
-    { copts     : PolyML.Compiler.compilerParameters list
-    , depsFirst : bool
+    { depsFirst : bool
     , jobs      : int
     }
 
@@ -130,7 +128,7 @@ struct
     datatype z = datatype Basis.dec
     datatype z = datatype Basis.exp
   in
-    fun compileBas (log as { pathFmt, print }) opts ns ret ds =
+    fun compileBas (log as { pathFmt, print }) ns ret ds =
       let
         fun elab (opts, ign) (ns as NS.N (bns, pns), ds, cont) =
           let
@@ -234,14 +232,14 @@ struct
             dec ds
           end
       in
-        elab (opts, []) (getOpt (ns, NS.empty ()), ds, fn ns => Done (ret, ns))
+        elab ([], []) (getOpt (ns, NS.empty ()), ds, fn ns => Done (ret, ns))
       end
   end
 
   fun logElab { pathFmt, print } p =
     print (Log.Info, "elaborating " ^ pathFmt p)
 
-  fun serialDeps (log, copts) ({ root as D.N (r, _, _), order, ... } : D.t) =
+  fun serialDeps log ({ root as D.N (r, _, _), order, ... } : D.t) =
     let
       val nss : NS.t H.hash = H.hash (order * 5 div 4)
 
@@ -261,7 +259,7 @@ struct
               H.update (nss, p, ns);
               app f deps;
               logElab log p;
-              cont (compileBas log copts (SOME ns) p bas);
+              cont (compileBas log (SOME ns) p bas);
               ()
             end
     in
@@ -269,7 +267,7 @@ struct
       (valOf o H.sub) (nss, r)
     end
 
-  fun serialEncounter (log, copts) ({ root = D.N (r, b, _), bas, order, ... } : D.t) =
+  fun serialEncounter log ({ root = D.N (r, b, _), bas, order, ... } : D.t) =
     let
       val nss : NS.t H.hash = H.hash (order * 5 div 4)
 
@@ -280,17 +278,17 @@ struct
             | NONE =>
                 let
                   val _ = logElab log p
-                  val ns = (cont o compileBas log copts NONE p o bas) p
+                  val ns = (cont o compileBas log NONE p o bas) p
                 in
                   H.update (nss, p, ns);
                   cont (f ns)
                 end
     in
       logElab log r;
-      cont (compileBas log copts NONE r b)
+      cont (compileBas log NONE r b)
     end
 
-  fun parDeps jobs (log, copts) ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
+  fun parDeps jobs log ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
     let
       val counts : (M.mutex * int ref) H.hash = H.hash 10
       val nss : NS.t H.hash = H.hash (order * 5 div 4)
@@ -335,7 +333,7 @@ struct
 
       and comp (D.N (s, bas, revs)) () =
         ( logElab log s
-        ; cont (compileBas log copts ((SOME o valOf o H.sub) (nss, s)) s bas)
+        ; cont (compileBas log ((SOME o valOf o H.sub) (nss, s)) s bas)
         ; app postDep revs
         )
     in
@@ -346,7 +344,7 @@ struct
       | SOME e => raise e
     end
 
-  fun parConc jobs (log, copts) ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
+  fun parConc jobs log ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
     let
       type c = int * (int * string) cont
       val sz = order * 5 div 4
@@ -398,7 +396,7 @@ struct
             ; PTP.submit
                 (tp, (p, fn () =>
                   ( logElab log s
-                  ; cont (compileBas log copts (SOME ns) (p, s) bas)
+                  ; cont (compileBas log (SOME ns) (p, s) bas)
                   )))
             ; app comp revs
             )
@@ -416,10 +414,10 @@ struct
     else
       Int.min (j, Thread.Thread.numProcessors ())
 
-  fun compile log { copts, depsFirst, jobs } =
+  fun compile log { depsFirst, jobs } =
     (case (numJobs jobs, depsFirst) of
       (1, true) => serialDeps
     | (1, _)    => serialEncounter
     | (n, true) => parDeps n
-    | (n, _)    => parConc n) (log, copts)
+    | (n, _)    => parConc n) log
 end

@@ -321,7 +321,7 @@ local
     let
       val l =
         [ P.PathMap pathMap
-        , P.CompileOpts { jobs = jobs, depsFirst = depsf, copts = [] }
+        , P.Concurrency { depsFirst = depsf, jobs = jobs }
         , P.DisabledAnns disAnns
         ]
       val l =
