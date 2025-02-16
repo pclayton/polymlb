@@ -34,6 +34,7 @@ end =
 struct
   structure A  = Array
   structure AS = ArraySlice
+  structure BA = BoolArray
   structure H  = HashArray
   structure L  = List
   structure V  = Vector
@@ -104,7 +105,48 @@ struct
     fun clear (t as (ri, x, _)) = (AS.modify (fn _ => x) (slice t); ri := 0)
   end
 
-  structure B  = Buffer
+  structure Set :>
+  sig
+    type t
+    val new : int -> t
+    val sub : t * int -> bool
+    val set : t * int -> unit
+    val del : t * int -> unit
+    val clear : t -> unit
+  end =
+  struct
+    type t = BA.array
+    fun new i = BA.array (i, false)
+    val sub = BA.sub
+    fun set (a, i) = BA.update (a, i, true)
+    fun del (a, i) = BA.update (a, i, false)
+    val clear = BA.modify (fn _ => false)
+  end
+
+  structure Matrix :>
+  sig
+    type t
+    val new : int -> t
+    val sub : t * int * int -> bool
+    val set : t * int * int -> unit
+    val del : t * int * int -> unit
+    val clear : t -> unit
+  end =
+  struct
+    (* use BoolArray over BoolArray2 because the latter does not seem to have
+     * a packed representation
+     *)
+    type t = int * BA.array
+    fun new i = (i, BA.array (i * i, false))
+    fun sub ((c, a), i, j) = BA.sub (a, i * c + j)
+    fun set ((c, a), i, j) = BA.update (a, i * c + j, true)
+    fun del ((c, a), i, j) = BA.update (a, i * c + j, false)
+    fun clear (_, a) = BA.modify (fn _ => false) a
+  end
+
+  structure B = Buffer
+  structure S = Set
+  structure M = Matrix
 
   datatype node = N of int * node vector
 
@@ -131,117 +173,6 @@ struct
   type opts =
     { logger : Log.logger option
     }
-
-  fun hsub z = Option.valOf (H.sub z)
-
-  local
-    structure W = Word
-
-    val `& = W.andb
-    val `| = W.orb
-    val << = W.<<
-    val ~  = W.notb
-
-    infix 8 `& `| <<
-
-    val itor = Real.fromInt
-    val itow = W.fromInt
-
-    val ws = W.wordSize
-
-    local
-      (* We assume that Word.wordSize is 63.
-       * Should it be even, this should be `ws - 1`.
-       * Additionally, it'd likely be a power of 2, in which case all the div
-       * ops may be replaced with right shifts by a value BITS such that
-       * `0w1 << BITS = wordSize`, e.g 0w6 for Word64.
-       *)
-      val w' = itow ws
-    in
-      fun bit w = 0w1 << (w `& w')
-    end
-  in
-    structure BitSet :>
-    sig
-      type t
-      val new : int -> t
-      val sub : t * int -> bool
-      val set : t * int -> unit
-      val del : t * int -> unit
-      val clear : t -> unit
-    end =
-    struct
-      type t = word A.array
-
-      fun new i = A.array (Real.ceil (itor i / itor ws), 0w0)
-
-      fun sub (a, i) = A.sub (a, i div ws) `& bit (itow i) <> 0w0
-
-      fun set (a, i) =
-        let
-          val j = i div ws
-        in
-          A.update (a, j, A.sub (a, j) `| bit (itow i))
-        end
-
-      fun del (a, i) =
-        let
-          val j = i div ws
-        in
-          A.update (a, j, A.sub (a, j) `& (~ o bit o itow) i)
-        end
-
-      val clear = A.modify (fn _ => 0w0)
-    end
-
-    structure BitMatrix :>
-    sig
-      type t
-      val new : int -> t
-      val sub : t * int * int -> bool
-      val set : t * int * int -> unit
-      val del : t * int * int -> unit
-      val clear : t -> unit
-    end =
-    struct
-      type t = word A.array * int
-
-      fun new i = (A.array (Real.ceil (itor (i * i) / itor ws), 0w0), i)
-
-      fun idx (c, i, j) =
-        let
-          val n = i * c + j
-        in
-          (n div ws, n mod ws)
-        end
-
-      fun sub ((a, c), i, j) =
-        let
-          val (i, j) = idx (c, i, j)
-        in
-          A.sub (a, i) `& bit (itow j) <> 0w0
-        end
-
-      fun set ((a, c), i, j) =
-        let
-          val (i, j) = idx (c, i, j)
-        in
-          A.update (a, i, A.sub (a, i) `| bit (itow j))
-        end
-
-      fun del ((a, c), i, j) =
-        let
-          val (i, j) = idx (c, i, j)
-        in
-          A.update (a, i, A.sub (a, i) `& (~ o bit o itow) j)
-        end
-
-      fun clear (a, _) = A.modify (fn _ => 0w0) a
-    end
-  end
-
-  structure S = BitSet
-  structure M = BitMatrix
 
   fun index (l, s) =
     let
@@ -307,9 +238,7 @@ struct
                       end
               in
                 B.addIfAbsent op= (B.sub (deps, id), id');
-                (* B.add (B.sub (deps, id), id'); *)
                 B.addIfAbsent op= (B.sub (revs, id'), id);
-                (* B.add (B.sub (revs, id'), id); *)
                 dec (ds, id, ps, is)
               end
         | dec (Ann (l, ds') :: ds, id, ps, is) =
@@ -355,13 +284,11 @@ struct
    *   https://stackoverflow.com/a/16357676
    *)
   local
-    infix ++>
-    fun n ++> f =
+    fun loop n f =
       let
-        val i = ref 0
+        fun loop' i = if i = n then () else (f i; loop' (i + 1))
       in
-        while !i <> n do
-          (f (!i); i := !i + 1)
+        loop' 0
       end
   in
     fun reduce (ir as { bases, deps, revs, ... } : ir) : ir =
@@ -370,11 +297,11 @@ struct
         val m = M.new sz
         val s = S.new sz
 
-        fun f id =
+        fun init id =
           if (not o S.sub) (s, id) then
             ( S.set (s, id)
             ; (B.clear o B.sub) (revs, id)
-            ; ( AS.app (fn id' => (M.set (m, id, id'); f id'))
+            ; ( AS.app (fn id' => (M.set (m, id, id'); init id'))
               o B.slice
               o B.sub
               ) (deps, id)
@@ -402,26 +329,26 @@ struct
             ()
       in
         (* construct edge matrix *)
-        f 0;
+        init 0;
         S.clear s;
 
         (* transform edge- into path matrix *)
-        sz ++> (fn i =>
-          sz ++> (fn j =>
+        loop sz (fn i =>
+          loop sz (fn j =>
             if i = j orelse (not o M.sub) (m, j, i) then
               ()
             else
-              sz ++> (fn k =>
+              loop sz (fn k =>
                 if (not o M.sub) (m, j, k) andalso M.sub (m, i, k) then
                   M.set (m, j, k)
                 else
                   ())));
 
         (* unset unwanted edges *)
-        sz ++> (fn j =>
-          sz ++> (fn i =>
+        loop sz (fn j =>
+          loop sz (fn i =>
             if M.sub (m, i, j) then
-              sz ++> (fn k =>
+              loop sz (fn k =>
                 if M.sub (m, j, k) then
                   M.del (m, i, k)
                 else
@@ -431,7 +358,6 @@ struct
 
         (* delete from the graph *)
         update 0;
-
         ir
       end
   end
