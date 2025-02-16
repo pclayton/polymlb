@@ -18,6 +18,7 @@ sig
 
   type opts =
     { logger : Log.logger option
+    , reduce : bool
     }
 
   (* Traverse and reduce to a minimal equivalent the DAG formed by having the
@@ -172,6 +173,7 @@ struct
 
   type opts =
     { logger : Log.logger option
+    , reduce : bool
     }
 
   fun index (l, s) =
@@ -418,7 +420,7 @@ struct
       end
   end
 
-  fun process { logger } f s =
+  fun process { logger, reduce = red } f s =
     let
       val (log, parse) =
         case logger of
@@ -430,7 +432,10 @@ struct
       fun (m @ f) z = (log m; f z)
     in
       ( "building MLB graph"   @ mkDag
-      o "reducing MLB graph"   @ reduce
+      o (if red then
+          "reducing MLB graph" @ reduce
+        else
+          (fn x => x))
       o "traversing MLB graph" @ traverse parse
       ) s
     end

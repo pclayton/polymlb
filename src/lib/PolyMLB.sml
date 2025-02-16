@@ -194,7 +194,11 @@ struct
         o readFile
         ) p
     in
-      (Ok o f copts o Dag.process { logger = logger } mkBas o OSF.fullPath) src
+      ( Ok
+      o f copts
+      o Dag.process { logger = logger, reduce = true } mkBas
+      o OSF.fullPath
+      ) src
       handle x =>
         let
           val err =
