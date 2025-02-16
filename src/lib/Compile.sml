@@ -23,6 +23,8 @@ sig
   val compile : opts -> Dag.t -> NameSpace.t
 end =
 struct
+  structure A    = Array
+  structure BA   = BoolArray
   structure D    = Dag
   structure FTP  = ThreadPool.FTP
   structure H    = HashArray
@@ -34,6 +36,7 @@ struct
   structure PTP  = ThreadPool.PTP
   structure TIO  = TextIO
   structure TSIO = TIO.StreamIO
+  structure V    = Vector
 
   datatype err =
     Compilation of string * P.location
@@ -250,90 +253,85 @@ struct
     | logElab (SOME { pathFmt, print }) p =
         print (Log.Info, fn () => "elaborating " ^ pathFmt p)
 
-  fun serialDeps log ({ root as D.N (r, _, _), order, ... } : D.t) =
+  fun serialDeps log ({ root as D.N (r, _), bases, id, path, ... } : D.t) =
     let
-      val nss : NS.t H.hash = H.hash (order * 5 div 4)
+      val nss : NS.t option array = A.array (V.length bases, NONE)
 
       fun cont (Done _) = ()
         | cont (Cont (_, p, f)) =
-            case H.sub (nss, p) of
+            case A.sub (nss, id p) of
               SOME ns => cont (f ns)
             | NONE => raise Compile (Dependency p)
 
-      fun f (D.N (p, bas, deps)) =
-        case H.sub (nss, p) of
+      fun f (D.N (p, deps)) =
+        case A.sub (nss, p) of
           SOME _ => ()
         | NONE =>
             let
               val ns = NS.empty ()
             in
-              H.update (nss, p, ns);
-              app f deps;
-              logElab log p;
-              cont (compileBas log (SOME ns) p bas);
+              A.update (nss, p, SOME ns);
+              V.app f deps;
+              logElab log (path p);
+              (cont o compileBas log (SOME ns) p o V.sub) (bases, p);
               ()
             end
     in
       f root;
-      (valOf o H.sub) (nss, r)
+      (valOf o A.sub) (nss, r)
     end
 
-  fun serialEncounter log ({ root = D.N (r, b, _), bas, order, ... } : D.t) =
+  fun serialEncounter log ({ root = D.N (r,  _), bases, id, path, ... } : D.t) =
     let
-      val nss : NS.t H.hash = H.hash (order * 5 div 4)
+      val nss : NS.t option array = A.array (V.length bases, NONE)
 
-      fun cont (Done (p, ns)) = ns before H.update (nss, p, ns)
+      fun cont (Done (p, ns)) = ns before A.update (nss, p, SOME ns)
         | cont (Cont (_, p, f)) =
-            case H.sub (nss, p) of
-              SOME ns => cont (f ns)
-            | NONE =>
-                let
-                  val _ = logElab log p
-                  val ns = (cont o compileBas log NONE p o bas) p
-                in
-                  H.update (nss, p, ns);
-                  cont (f ns)
-                end
+            let
+              val i = id p
+            in
+              case A.sub (nss, i) of
+                SOME ns => cont (f ns)
+              | NONE =>
+                  let
+                    val _ = logElab log p
+                    val ns = (cont o compileBas log NONE i o V.sub) (bases, i)
+                  in
+                    cont (f ns)
+                  end
+            end
     in
-      logElab log r;
-      cont (compileBas log NONE r b)
+      logElab log (path r);
+      (cont o compileBas log NONE r o V.sub) (bases, r)
     end
 
-  fun parDeps jobs log ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
+  fun parDeps jobs log ({ root as D.N (s, _), leaves, bases, id, path } : D.t) =
     let
-      val counts : (M.mutex * int ref) H.hash = H.hash 10
-      val nss : NS.t H.hash = H.hash (order * 5 div 4)
+      val counts = A.tabulate (V.length bases, fn _ => (M.mutex (), ref ~1))
+      val nss = A.tabulate (V.length bases, fn _ => NS.empty ())
       val tp = FTP.new jobs
 
-      fun ns s =
-        case H.sub (nss, s) of
-          SOME _ => ()
-        | NONE => H.update (nss, s, NS.empty ())
+       fun doCounts (D.N (s, v)) =
+        let
+          val (_, r) = A.sub (counts, s)
+        in
+          if !r > ~1 then
+            ()
+          else
+            r := V.length v;
+            V.app doCounts v
+        end
 
-      fun doCounts (D.N (s, _, [])) = ns s
-        | doCounts (D.N (s, _, [d])) = (ns s; doCounts d)
-        | doCounts (D.N (s, _, deps)) =
-            (case H.sub (counts, s) of
-              SOME _ => ()
-            | NONE =>
-                let
-                  val i = ref 0
-                in
-                  H.update (counts, s, (M.mutex (), i));
-                  ns s;
-                  app (fn d => (i := !i + 1; doCounts d)) deps
-                end)
-
-      fun cont (Cont (_, p, f)) =
-            (case H.sub (nss, p) of
-              SOME ns => cont (f ns)
-            | NONE => raise Compile (Dependency p))
+      fun cont (Cont (_, p, f)) = (cont o f o A.sub) (nss, id p)
         | cont _ = ()
 
-      fun postDep (n as D.N (s, _, _)) =
-        case H.sub (counts, s) of
-          NONE => FTP.submit (tp, comp n)
-        | SOME (m, r) =>
+      fun postDep (n as D.N (s, _)) =
+        let
+          val (m, r) = A.sub (counts, s)
+        in
+          if !r <= 0 then
+            FTP.submit (tp, comp n)
+          else
             ( M.lock m
             ; r := !r - 1
             ; if !r = 0 before M.unlock m then
@@ -341,81 +339,93 @@ struct
               else
                 ()
             )
+        end
 
-      and comp (D.N (s, bas, revs)) () =
-        ( logElab log s
-        ; cont (compileBas log ((SOME o valOf o H.sub) (nss, s)) s bas)
-        ; app postDep revs
+      and comp (D.N (s, revs)) () =
+        ( logElab log (path s)
+        ; (cont o compileBas log ((SOME o A.sub) (nss, s)) s o V.sub) (bases, s)
+        ; V.app postDep revs
         )
     in
       doCounts root;
-      app (fn n => comp n ()) leaves;
+      V.app (fn n => comp n ()) leaves;
       case FTP.wait tp of
-        NONE => (valOf o H.sub) (nss, s)
+        NONE => A.sub (nss, s)
       | SOME e => raise e
     end
 
-  fun parConc jobs log ({ root as D.N (s, _, _), leaves, order, ... } : D.t) =
+  fun parConc jobs log ({ root as D.N (s, _), leaves, bases, id, path } : D.t) =
     let
-      type c = int * (int * string) cont
-      val sz = order * 5 div 4
-      val nss : (NS.t * bool ref * c list ref * M.mutex) H.hash = H.hash sz
-      val prios : (int * NS.t) H.hash = H.hash sz
+      type c = int * (int * int) cont
+
+      val sz    = V.length bases
+      val m     = M.mutex ()
+      val dones = BA.array (sz, false)
+      val conts = A.tabulate (sz, fn _ => ([] : c list))
+      val nss   = V.tabulate (sz, fn _ => NS.empty ())
+      val prios = A.array (sz, ~1)
+
       val tp = PTP.new jobs
 
-      fun doPrio i (D.N (s, _, deps)) =
-        case H.sub (prios, s) of
-          SOME (j, ns) => if j < i then H.update (prios, s, (i, ns)) else ()
-        | NONE =>
-            let
-              val ns = NS.empty ()
-            in
-              H.update (prios, s, (i, ns));
-              H.update (nss, s, (ns, ref false, ref [], M.mutex ()));
-              app (doPrio (i + 1)) deps
-            end
+      fun doPrio i (D.N (s, deps)) =
+        let
+          val j = A.sub (prios, s)
+        in
+            if j < i then
+              ( A.update (prios, s, i)
+              ; if j = ~1 then V.app (doPrio (i + 1)) deps else ()
+              )
+            else
+              ()
+        end
 
-      fun cont (Done ((_, p), _)) =
-            let
-              val (ns, b, l, m) = (valOf o H.sub) (nss, p)
-            in
-              M.lock m;
-              b := true;
-              M.unlock m;
-              L.app
+      fun cont (Done ((_, p), ns)) =
+            ( M.lock m
+            ; BA.update (dones, p, true)
+            ; M.unlock m
+            ; L.app
                 (fn (p, f) => PTP.submit (tp, (p, fn () => cont (f ns))))
-                (!l)
-            end
+                (A.sub (conts, p))
+            )
         | cont (Cont ((prio, _), p, f)) =
             let
-              val (ns, b, l, m) = (valOf o H.sub) (nss, p)
+              val i = id p
             in
-              if !b then
-                cont (f ns)
+              if BA.sub (dones, i) then
+                (cont o f o V.sub) (nss, i)
               else
-                if (M.lock m; !b) then
-                  (M.unlock m; cont (f ns))
+                if (M.lock m; BA.sub (dones, i)) then
+                  (M.unlock m; (cont o f o V.sub) (nss, i))
                 else
-                  (l := (prio, f) :: !l; M.unlock m)
+                  ( A.update (conts, i, (prio, f) :: A.sub (conts, i))
+                  ; M.unlock m
+                  )
             end
 
-      fun comp (D.N (s, bas, revs)) =
-        case H.sub (prios, s) of
-          NONE => ()
-        | SOME (p, ns) =>
-            ( H.delete (prios, s)
+      fun comp (D.N (s, revs)) =
+        let
+          val p = A.sub (prios, s)
+        in
+          if p = ~1 then
+            ()
+          else
+            ( A.update (prios, s, ~1)
             ; PTP.submit
                 (tp, (p, fn () =>
-                  ( logElab log s
-                  ; cont (compileBas log (SOME ns) (p, s) bas)
+                  ( logElab log (path s)
+                  ; ( cont
+                    o compileBas log ((SOME o V.sub) (nss, s)) (p, s)
+                    o V.sub
+                    ) (bases, s)
                   )))
-            ; app comp revs
+            ; V.app comp revs
             )
+        end
     in
       doPrio 0 root;
-      app comp leaves;
+      V.app comp leaves;
       case PTP.wait tp of
-        NONE => (#1 o valOf o H.sub) (nss, s)
+        NONE => V.sub (nss, s)
       | SOME e => raise e
     end
 

@@ -110,16 +110,18 @@ digraph G {
   b4 -> b5;
 }
 *)
+
+  val fl = Vector.fromList
 in
   val _ =
   "Dag.process reduces input graph"
   assert
     #root (process b "b1")
   eq
-    D.N ("b1", b1,
-      [ D.N ("b2", b2,
-        [ D.N ("b3", b3, [])
-        , D.N ("b4", b4, [D.N ("b5", b5, [])])
+    D.N (0, fl
+      [ D.N (1, fl
+        [ D.N (2, fl [])
+        , D.N (3, fl [D.N (4, fl [])])
         ])
       ])
 end

@@ -1,12 +1,15 @@
 structure Dag :
 sig
-  datatype node = N of string * Basis.t * node list
+  datatype node = N of int * node vector
 
   type t =
     { root   : node
-    , leaves : node list
-    , bas    : string -> Basis.t
-    , order  : int
+    , leaves : node vector
+    , bases  : Basis.t vector
+      (* raises on invalid path *)
+    , id     : string -> int
+      (* raises on invalid id *)
+    , path   : int -> string
     }
 
   datatype err = Cycle of string list
@@ -29,24 +32,96 @@ sig
   val process : opts -> (string -> Basis.t) -> string -> t
 end =
 struct
-  structure H = HashArray
-  structure L = List
+  structure A  = Array
+  structure AS = ArraySlice
+  structure H  = HashArray
+  structure L  = List
+  structure V  = Vector
 
-  datatype node = N of string * Basis.t * node list
+  structure Buffer :>
+  sig
+    type 'a t
+
+    val new : int * 'a -> 'a t
+    val cnt : 'a t -> int
+
+    val add : 'a t * 'a -> unit
+    val sub : 'a t * int -> 'a
+    val set : 'a t * int * 'a -> unit
+    val clear : 'a t -> unit
+    val addIfAbsent : ('a * 'a -> bool) -> 'a t * 'a -> unit
+
+    val slice : 'a t -> 'a AS.slice
+    val array : 'a t -> 'a array
+    val vec   : 'a t -> 'a vector
+  end =
+  struct
+    type 'a t = int ref * 'a * 'a array ref
+
+    fun new (i, x) = (ref 0, x, (ref o A.array) (i, x))
+
+    fun cnt (ref i, _, _) = i
+
+    fun resize ((ri, x, ra as ref a), n) =
+      let
+        val a' = A.array (Int.max (A.length a * 2, n), x)
+      in
+        AS.copy { src = AS.slice (a, 0, SOME (!ri)), dst = a', di = 0 };
+        ra := a';
+        ()
+      end
+
+    fun add (t as (ri, _, ra), x) =
+      ( if !ri = A.length (!ra) then resize (t, 1) else ()
+      ; A.update (!ra, !ri, x)
+      ; ri := !ri + 1
+      )
+
+    fun sub ((_, _, ref a), i) = A.sub (a, i)
+
+    fun set (t as (ri, _, ra), i, x) =
+      ( if i >= A.length (!ra) then resize (t, i + 1) else ()
+      ; A.update (!ra, i, x)
+      ; ri := Int.max (!ri, i) + 1
+      )
+
+    fun addIfAbsent eq (t as (ref i, _, ref a), x) =
+      let
+        fun f j = i <> j andalso (eq (x, A.sub (a, j)) orelse f (j + 1))
+      in
+        if f 0 then
+          ()
+        else
+          add (t, x)
+      end
+
+    fun slice (ref i, _, ref a) = AS.slice (a, 0, SOME i)
+
+    fun array (ref i, _, ref a) = A.tabulate (i, fn j => A.sub (a, j))
+
+    fun vec z = AS.vector (slice z)
+
+    fun clear (t as (ri, x, _)) = (AS.modify (fn _ => x) (slice t); ri := 0)
+  end
+
+  structure B  = Buffer
+
+  datatype node = N of int * node vector
 
   type t =
     { root   : node
-    , leaves : node list
-    , bas    : string -> Basis.t
-    , order  : int
+    , leaves : node vector
+    , bases  : Basis.t vector
+    , id     : string -> int
+    , path   : int -> string
     }
 
   type ir =
-    { root  : string
-    , bases : (int * Basis.t) H.hash
-    , deps  : int H.hash H.hash
-    , revs  : int H.hash H.hash
-    , order : int
+    { bases : Basis.t vector
+    , paths : string vector
+    , ids   : int H.hash
+    , deps  : int B.t B.t
+    , revs  : int B.t B.t
     }
 
   datatype err = Cycle of string list
@@ -60,7 +135,6 @@ struct
   fun hsub z = Option.valOf (H.sub z)
 
   local
-    structure A = Array
     structure W = Word
 
     val `& = W.andb
@@ -191,64 +265,86 @@ struct
   datatype z = datatype Basis.dec
   datatype z = datatype Basis.exp
 
+  val baseSize = 10
+
   (* Depth first so that any cycle found is the first one when reading
    * sequentially from the root.
-   * Nested hash maps instead of list H.hash to filter out duplicates.
    *)
   fun traverse getBas root : ir =
     let
-      val bases : (int * Basis.t) H.hash = H.hash 10
-      val deps  : int H.hash H.hash = H.hash 10
-      val revs  : int H.hash H.hash = H.hash 10
-      val order = ref 1
+      val bases : Basis.t B.t = B.new (baseSize * 2, [])
+      val paths : string B.t = B.new (baseSize * 2, "")
+      val ids   : int H.hash = H.hash (baseSize * 2)
+      val deps  = B.new (baseSize, B.new (0, ~1))
+      val revs  = B.new (baseSize, B.new (0, ~1))
 
-      fun dec ([], _, _) = ()
-        | dec (Basis (_, e) :: ds, ps, is) =
-            (exp (e, ps, is); dec (ds, ps, is))
-        | dec (BasisFile p :: ds, ps, is) =
+      fun dec ([], _, _, _) = ()
+        | dec (Basis (_, e) :: ds, id, ps, is) =
+            (exp (e, id, ps, is); dec (ds, id, ps, is))
+        | dec (BasisFile p :: ds, id, ps, is) =
             if L.exists (fn p' => p = p') is then
-              dec (ds, ps, is)
+              dec (ds, id, ps, is)
             else
-              ( case H.sub (bases, p) of
-                  SOME _ =>
-                    (case index (ps, p) of
-                      ~1 => ()
-                    | i => raise (Dag o Cycle) (p :: (rev o L.take) (ps, i)))
-                | NONE =>
-                    let
-                      val ds' = getBas p
-                    in
-                      H.update (bases, p, (!order, ds'));
-                      order := !order + 1;
-                      dec (ds', p::ps, [])
-                    end
-              ; upd (deps, hd ps, p, (#1 o hsub) (bases, p))
-              ; upd (revs, p, hd ps, (#1 o hsub) (bases, hd ps))
-              ; dec (ds, ps, is)
-              )
-        | dec (Ann (l, ds') :: ds, ps, is) =
+              let
+                val id' =
+                  case H.sub (ids, p) of
+                    SOME id =>
+                      (case index (ps, p) of
+                        ~1 => id
+                      | i => raise (Dag o Cycle) (p :: (rev o L.take) (ps, i)))
+                  | NONE =>
+                      let
+                        val ds' = getBas p
+                        val id' = B.cnt bases
+                      in
+                        H.update (ids, p, id');
+                        B.add (paths, p);
+                        B.add (deps, B.new (id' + 1, ~1));
+                        B.add (revs, B.new (id' + 1, ~1));
+                        B.add (bases, ds');
+                        dec (ds', id', p::ps, []);
+                        id'
+                      end
+              in
+                B.addIfAbsent op= (B.sub (deps, id), id');
+                (* B.add (B.sub (deps, id), id'); *)
+                B.addIfAbsent op= (B.sub (revs, id'), id);
+                (* B.add (B.sub (revs, id'), id); *)
+                dec (ds, id, ps, is)
+              end
+        | dec (Ann (l, ds') :: ds, id, ps, is) =
             ( if Ann.exists Ann.Discard l then
                 ()
               else
-                dec (ds', ps,
+                dec (ds', id, ps,
                   L.foldl
                     (fn (Ann.IgnoreFiles f, fs) => f @ fs | (_, fs) => fs)
                     is l)
-            ; dec (ds, ps, is)
+            ; dec (ds, id, ps, is)
             )
-        | dec (Local (ds1, ds2) :: ds, ps, is) =
-            (dec (ds1, ps, is); dec (ds2, ps, is); dec (ds, ps, is))
-        | dec (_::ds, ps, is) = dec (ds, ps, is)
+        | dec (Local (ds1, ds2) :: ds, id, ps, is) =
+            (dec (ds1, id, ps, is); dec (ds2, id, ps, is); dec (ds, id, ps, is))
+        | dec (_::ds, id, ps, is) = dec (ds, id, ps, is)
 
-      and exp (Bas ds, ps, is) = dec (ds, ps, is)
-        | exp (Let (ds, e), ps, is) = (dec (ds, ps, is); exp (e, ps, is))
-        | exp (Id _, _, _) = ()
+      and exp (Bas ds, id, ps, is) = dec (ds, id, ps, is)
+        | exp (Let (ds, e), id, ps, is) = (dec (ds, id, ps, is); exp (e, id, ps, is))
+        | exp (Id _, _, _, _) = ()
 
       val bas = getBas root
     in
-      H.update (bases, root, (0, bas));
-      dec (bas, [root], []);
-      { root = root, bases = bases, deps = deps, revs = revs, order = !order }
+      H.update (ids, root, 0);
+      B.set (bases, 0, bas);
+      B.set (paths, 0, root);
+      B.set (deps, 0, B.new (baseSize, ~1));
+      B.set (revs, 0, B.new (baseSize, ~1));
+      dec (bas, 0, [root], []);
+
+      { bases = B.vec bases
+      , paths = B.vec paths
+      , ids   = ids
+      , deps  = deps
+      , revs  = revs
+      }
     end
 
   (* Hsu's algorithm for transitive reduction; "An algorithm for finding a
@@ -268,42 +364,45 @@ struct
           (f (!i); i := !i + 1)
       end
   in
-    fun reduce ({ root, bases, deps, revs, order } : ir) : ir =
+    fun reduce (ir as { bases, deps, revs, ... } : ir) : ir =
       let
-        val sz = order
+        val sz = V.length bases
         val m = M.new sz
         val s = S.new sz
 
-        fun f (p, id) =
+        fun f id =
           if (not o S.sub) (s, id) then
-            case (S.set (s, id); H.sub (deps, p)) of
-              NONE => ()
-            | SOME ds =>
-                H.fold
-                  (fn (p', id', ()) => (M.set (m, id, id'); f (p', id')))
-                  () ds
+            ( S.set (s, id)
+            ; (B.clear o B.sub) (revs, id)
+            ; ( AS.app (fn id' => (M.set (m, id, id'); f id'))
+              o B.slice
+              o B.sub
+              ) (deps, id)
+            )
           else
             ()
 
-        fun update (p, id) =
+        fun update id =
           if (not o S.sub) (s, id) then
-            case (S.set (s, id); H.sub (deps, p)) of
-              NONE => ()
-            | SOME ds =>
-                H.fold
-                  (fn (p', id', ()) =>
-                    ( if (not o M.sub) (m, id, id') then
-                        (H.delete (ds, p'); H.delete (hsub (revs, p'), p))
-                      else
-                        ()
-                    ; update (p', id')
-                    ))
-                  () ds
+            let
+              val b = B.sub (deps, id)
+              val l = AS.foldr
+                (fn (id', ids) => if M.sub (m, id, id') then id'::ids else ids)
+                [] (B.slice b)
+            in
+              S.set (s, id);
+              B.clear b;
+              app (fn id' =>
+                ( B.add (b, id')
+                ; B.add (B.sub (revs, id'), id)
+                ; update id'
+                )) l
+            end
           else
             ()
       in
         (* construct edge matrix *)
-        f (root, 0);
+        f 0;
         S.clear s;
 
         (* transform edge- into path matrix *)
@@ -331,62 +430,67 @@ struct
               ()));
 
         (* delete from the graph *)
-        update (root, 0);
+        update 0;
 
-        { root = root, bases = bases, deps = deps, revs = revs, order = order }
+        ir
       end
   end
 
-  fun mkDag ({ root, bases, deps, revs, order } : ir) : t =
-    let
-      val empty  : int  H.hash = H.hash 1
-      val ndeps  : node H.hash = H.hash order
-      val nrevs  : node H.hash = H.hash order
-      val leaves : unit H.hash = H.hash 4
+  local
+    val dummy = N (~1, V.fromList [])
+    fun isDummy (N (i, _)) = i = ~1
+  in
+    fun mkDag ({ bases, paths, ids, deps, revs } : ir) : t =
+      let
+        val ndeps  = A.array (V.length bases, dummy)
+        val nrevs  = A.array (V.length bases, dummy)
+        val leaves = B.new (baseSize, ~1)
 
-      fun dep s =
-        case H.sub (ndeps, s) of
-          SOME n => n
-        | NONE =>
+        fun dep id =
+          if (not o isDummy o A.sub) (ndeps, id) then
+            A.sub (ndeps, id)
+          else
             let
-              val n as N (_, _, l) =
-                N ( s
-                  , (#2 o hsub) (bases, s)
-                  , ( map dep
-                    o H.fold (fn (k, _, l) => k::l) []
-                    o getOpt
-                    ) (H.sub (deps, s), empty)
+              val n as N (_, v) =
+                N ( id
+                  , let
+                      val b = B.sub (deps, id)
+                    in
+                      V.tabulate (B.cnt b, fn i => (dep o B.sub) (b, i))
+                    end
                   )
             in
-              H.update (ndeps, s, n);
-              if L.null l then H.update (leaves, s, ()) else ();
+              A.update (ndeps, id, n);
+              if V.length v = 0 then B.add (leaves, id) else ();
               n
             end
 
-      fun rev s =
-        case H.sub (nrevs, s) of
-          SOME n => n
-        | NONE =>
+        fun rev id =
+          if (not o isDummy o A.sub) (nrevs, id) then
+            A.sub (nrevs, id)
+          else
             let
               val n =
-                N ( s
-                  , (#2 o hsub) (bases, s)
-                  , ( map rev
-                    o H.fold (fn (k, _, l) => k::l) []
-                    o getOpt
-                    ) (H.sub (revs, s), empty)
+                N ( id
+                  , let
+                      val b = B.sub (revs, id)
+                    in
+                      V.tabulate (B.cnt b, fn i => (rev o B.sub) (b, i))
+                    end
                   )
             in
-              H.update (nrevs, s, n);
+              A.update (nrevs, id, n);
               n
             end
-    in
-      { root   = dep root
-      , leaves = map rev (H.fold (fn (k, _, l) => k::l) [] leaves)
-      , bas    = fn s => (#2 o hsub) (bases, s)
-      , order  = order
-      }
-    end
+      in
+        { root   = dep 0
+        , leaves = V.tabulate (B.cnt leaves, fn i => (rev o B.sub) (leaves, i))
+        , bases  = bases
+        , id     = fn s => (valOf o H.sub) (ids, s)
+        , path   = fn i => V.sub (paths, i)
+        }
+      end
+  end
 
   fun process { logger } f s =
     let
