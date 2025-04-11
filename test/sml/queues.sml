@@ -84,5 +84,4 @@ in
 
   "Prio queue does not retain extra elements"
   assert Prio.deq q eq NONE
-end;
-
+end
