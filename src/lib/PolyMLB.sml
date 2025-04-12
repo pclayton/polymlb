@@ -13,7 +13,8 @@ sig
   type opts = opt list
 
   datatype err =
-    Parse of Parse.err
+    Lex of Lex.err
+  | Parse of Parse.err
   | Validation of Basis.err
   | Dag of Dag.err
   | Compilation of Compile.err
@@ -53,7 +54,8 @@ struct
   type opts = opt list
 
   datatype err =
-    Parse of Parse.err
+    Lex of Lex.err
+  | Parse of Parse.err
   | Validation of Basis.err
   | Dag of Dag.err
   | Compilation of Compile.err
@@ -81,20 +83,31 @@ struct
       let
         val loc2s = Log.locFmt fmt
       in
-        fn Parse { expected, found, at } =>
-             cat
-               [ loc2s at, ": error: invalid grammar\nexpected "
-               , case expected of
-                   Parse.Dec     => "declaration"
-                 | Parse.Exp     => "expression"
-                 | Parse.LongId  => "qualified identifier"
-                 | Parse.ShortId => "identifier"
-                 | Parse.String  => "string constant"
-               , " but found "
-               , case found of
-                   Parse.EOS       => "end of stream"
-                 | Parse.Invalid t => "invalid token: '" ^ t ^ "'"
-               ]
+        fn Lex (e, at) =>
+            cat
+            [ loc2s at, ": error: invalid token:\n"
+            , case e of
+                Lex.BadChar c => "bad character '" ^ Char.toString c ^ "'"
+              | Lex.BadWord w => "reserved word not allowed here '" ^ w ^ "'"
+              | Lex.UnclosedComment => "unclosed comment"
+              | Lex.UnclosedString => "unclosed string"
+            ]
+        | Parse l =>
+            let
+              val toString = Parse.Element.toString
+              fun str nil = ""
+                | str [e] = toString e
+                | str  e  = "one of " ^ String.concatWith ", " (map toString e)
+              fun f ([], r) = r
+                | f ([{ expected, found, at }], r) =
+                    [ loc2s at, ": error: invalid grammar\nexpected "
+                    , str expected , " but found ", toString found, "\n"
+                    ] @ r
+                | f ({ expected = e, at, ... }::xs, r) =
+                    f (xs, ["parsing ", str e, " at ", loc2s at, "\n"] @ r)
+            in
+              (cat o f) (l, [])
+            end
         | Validation (kind, s, at) =>
             cat
               [ loc2s at, ": error: invalid declaration\n"
@@ -190,7 +203,8 @@ struct
             else
               #preproc opts { bas = b, path = p, root = false })
         o Basis.fromParse (convOpts p)
-        o Parse.parse { fileName = p, lineOffset = 0 }
+        o Parse.parse p
+        o Lex.lex p
         o readFile
         ) p
     in
@@ -203,7 +217,8 @@ struct
         let
           val err =
             case x of
-              Parse.Parse z      => Parse z
+              Lex.Lex z          => Lex z
+            | Parse.Parse z      => Parse z
             | Basis.Validation z => Validation z
             | Dag.Dag z          => Dag z
             | Compile.Compile z  => Compilation z

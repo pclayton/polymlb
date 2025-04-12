@@ -1,266 +1,378 @@
-structure Lex :
+structure Lex :>
 sig
-  structure Token :
-  sig
-    datatype id = Id | LongId
+  datatype token =
+    String of string
+  | Symbol of string
+  | And
+  | Ann
+  | Bas
+  | Basis
+  | End
+  | Eq
+  | Functor
+  | In
+  | Let
+  | Local
+  | Open
+  | Semi
+  | Signature
+  | Structure
 
-    datatype reserved =
-      Eq
-    | Semi
-    | And
-    | Ann
-    | Bas
-    | Basis
-    | End
-    | Functor
-    | In
-    | Let
-    | Local
-    | Open
-    | Signature
-    | Structure
-  end
+  val toString : token -> string
 
-  type state = string * int * int * substring
-  type 'a res = ('a * PolyML.location * state) option
+  eqtype position
 
-  val path : state -> string res
-  val id : Token.id -> state -> string res
-  val ann : state -> string res
-  val res : Token.reserved -> state -> unit res
+  val makePos : { startLine : int, startCol : int, endLine : int, endCol : int }
+    -> position
+  val joinPos : position * position -> position
+  val toPolyLoc : string * position -> PolyML.location
 
-  (* drop whitespace and comments *)
-  val drop : state -> state
+  type t = (token * position) list * { start : position, eof : position }
 
-  val any : state -> string * PolyML.location
+  datatype err_kind =
+    BadChar of char
+  | BadWord of string
+  | UnclosedComment
+  | UnclosedString
+
+  type err = err_kind * PolyML.location
+
+  exception Lex of err
+
+  (* raises Lex in case of
+   * - unclosed comment
+   * - unclosed string
+   * - invalid string char
+   * - bad reserved word
+   *)
+  val lex : string -> string -> t
 end =
 struct
   structure C  = Char
-  structure CV = CharVector
   structure S  = String
   structure SS = Substring
+  structure V  = Vector
 
-  structure Token =
-  struct
-    datatype id = Id | LongId
+  datatype token =
+    String of string
+  | Symbol of string
+  | And
+  | Ann
+  | Bas
+  | Basis
+  | End
+  | Eq
+  | Functor
+  | In
+  | Let
+  | Local
+  | Open
+  | Semi
+  | Signature
+  | Structure
 
-    datatype reserved =
-      Eq
-    | Semi
-    | And
-    | Ann
-    | Bas
-    | Basis
-    | End
-    | Functor
-    | In
-    | Let
-    | Local
-    | Open
-    | Signature
-    | Structure
+  fun toString t =
+    case t of
+      String "" => "string"
+    | String s => "string \"" ^ s ^ "\""
+    | Symbol "" => "symbol"
+    | Symbol s => "symbol \"" ^ s ^ "\""
+    | And => "and"
+    | Ann => "ann"
+    | Bas => "bas"
+    | Basis => "basis"
+    | End => "end"
+    | Eq => "="
+    | Functor => "functor"
+    | In => "in"
+    | Let => "let"
+    | Local => "local"
+    | Open => "open"
+    | Semi => ";"
+    | Signature => "signature"
+    | Structure => "structure"
+
+  (* Positions are packed in a single 63 bit word, where each line or column is
+   * represented with 15 bit. This assumes that {files,columns} are no longer
+   * than 32768 {lines,characters}. The storing order is [start line, start col,
+   * end line, end col], from the msb to the lsb.
+   *)
+  type position = word
+
+  local
+    val `& = Word.andb
+    val `| = Word.orb
+    val << = Word.<<
+    val >> = Word.>>
+
+    infix 8 `& `| `^ << >>
+
+    val toi = Word.toInt
+    val tow = Word.fromInt
+
+
+    val max = toi (0w1 << 0w15)
+
+    fun chkdw i =
+      if i >= max then
+        raise Fail ("Lex.mkPos: too large: " ^ Int.toString i)
+      else
+        tow i
+
+    val slineMask = (0w1 << 0w15 - 0w1) << 0w48
+    val scolMask  = (0w1 << 0w15 - 0w1) << 0w32
+    val elineMask = (0w1 << 0w15 - 0w1) << 0w16
+    val ecolMask  =  0w1 << 0w15 - 0w1
+
+    val sMask = (0w1 << 0w31 - 0w1) << 0w32
+    val eMask =  0w1 << 0w32 - 0w1
+  in
+    fun mkPos (l, c, l', c') =
+      (chkdw l << 0w48) `| (chkdw c << 0w32) `| (chkdw l' << 0w16) `| chkdw c'
+
+    fun joinPos (w1, w2) =
+      Word.min (w1 `& sMask, w2 `& sMask) `| Word.max (w1 `& eMask, w2 `& eMask)
+
+    fun unpackStart w =
+      (toi ((w `& slineMask) >> 0w48), toi ((w `& scolMask)  >> 0w32))
+
+    fun toPolyLoc (s, w) =
+      { file = s
+      , startLine     = toi ((w `& slineMask) >> 0w48)
+      , startPosition = toi ((w `& scolMask)  >> 0w32)
+      , endLine       = toi ((w `& elineMask) >> 0w16)
+      , endPosition   = toi  (w `& ecolMask)
+      }
   end
 
-  open Token
+  fun makePos { startLine, startCol, endLine, endCol } =
+      mkPos (startLine, startCol, endLine, endCol)
 
-  type state = string * int * int * substring
-  type 'a res = ('a * PolyML.location * state) option
-
-  fun mkLoc (f, l, c, l', c') =
-    { file = f
-    , startLine = l, endLine = l'
-    , startPosition = c, endPosition = c'
+  fun polyLoc (s, l, c, l', c') =
+    { file = s
+    , startLine = l, startPosition = c
+    , endLine = l', endPosition = c'
     }
 
-  fun drop (s, l, c, ss) =
-    let
-      fun sz i = i < SS.size ss
-      fun sub i = SS.sub (ss, i)
+  datatype err_kind =
+    BadChar of char
+  | BadWord of string
+  | UnclosedComment
+  | UnclosedString
 
-      fun comment (d, l, c, i) =
-        if not (sz i) then
-          (l, c, i) (* todo: unclosed comment *)
+  type err = err_kind * PolyML.location
+
+  exception Lex of err
+
+  type t = (token * position) list * { start : position, eof : position }
+
+  fun skip { name, line, col, src, res } =
+    let
+      fun ok i = i < SS.size src
+      fun sub i = SS.sub (src, i)
+
+      fun comment (s, l, c, i) =
+        if not (ok i) then
+          let
+            val (l', c') = hd s
+          in
+            raise Lex (UnclosedComment, polyLoc (name, l', c', l, c))
+          end
         else
           case sub i of
             #"(" =>
-              if sz (i + 1) andalso sub (i + 1) = #"*" then
-                comment (d + 1, l, c + 2, i + 2)
+              if ok (i + 1) andalso sub (i + 1) = #"*" then
+                comment ((l, c)::s, l, c + 2, i + 2)
               else
-                comment (d, l, c + 1, i + 1)
+                comment (s, l, c + 1, i + 1)
           | #"*" =>
-              if sz (i + 1) andalso sub (i + 1) = #")" then
-                if d = 0 then
-                  (l, c + 2, i + 2)
-                else
-                  comment (d - 1, l, c + 2, i + 2)
+              if ok (i + 1) andalso sub (i + 1) = #")" then
+                case s of
+                  [] => raise Fail "Lex.skip.comment: impossible"
+                | [_] => (l, c + 2, i + 2)
+                | _::s => comment (s, l, c + 2, i + 2)
               else
-                comment (d, l, c + 1, i + 1)
-          | #"\n" => comment (d, l + 1, 0, i + 1)
-          | _     => comment (d, l, c + 1, i + 1)
+                comment (s, l, c + 1, i + 1)
+          | #"\n" => comment (s, l + 1, 1, i + 1)
+          |   _   => comment (s, l, c + 1, i + 1)
 
-      fun f (l, c, i) =
-        if not (sz i) then
-          (s, l, c, SS.full "")
+      fun skip' (l, c, i) =
+        if not (ok i) then
+          (l, c, i)
         else if sub i = #"\n" then
-          f (l + 1, 0, i + 1)
+          skip' (l + 1, 0, i + 1)
         else if C.isSpace (sub i) then
-          f (l, c + 1, i + 1)
-        else if sub i = #"(" andalso sz (i + 1) andalso sub (i + 1) = #"*" then
-          (f o comment) (0, l, c + 2, i + 2)
+          skip' (l, c + 1, i + 1)
+        else if sub i = #"(" andalso ok (i + 1) andalso sub (i + 1) = #"*" then
+          (skip' o comment) ([(l, c)], l, c + 2, i + 2)
         else
-          (s, l, c, SS.triml i ss)
-    in
-      f (l, c, 0)
-    end
+          (l, c, i)
 
-  fun any (s, l, c, ss) =
-    let
-      val ss' = SS.string (SS.takel (not o C.isSpace) ss)
+      val (line, col, ofs) = skip' (line, col, 0)
     in
-      (ss', mkLoc (s, l, c, l, c + S.size ss'))
+      { line = line, col = col, src = SS.triml ofs src, res = res }
     end
 
   local
-    val res : unit HashArray.hash = HashArray.hash 35
-    val _ = List.app (fn s => HashArray.update (res, s, ()))
-      [ "abstype", "and", "andalso", "ann", "as", "bas", "basis", "case"
-      , "datatype", "do", "else", "end", "exception", "fn", "fun", "functor"
-      , "handle" , "if", "in", "infix", "infixr", "let", "local", "nonfix"
-      , "of", "op", "open", "orelse", "raise", "rec", "sig", "signature"
-      , "struct", "structure", "then", "type", "val", "with", "withtype"
-      , "while"
+    val S = SS.full
+  in
+    val keywords = (V.fromList o map (fn t => (S (toString t), t)))
+      [ And, Ann, Bas, Basis, End, Eq, Functor, In, Let, Local, Open, Semi
+      , Signature, Structure
       ]
 
-    fun word (c, ss) =
-      if SS.size ss = 0 orelse (not o C.isAlpha o SS.sub) (ss, 0) then
-        NONE
-      else
-        let
-          val (id, ss) =
-            SS.splitl
-              (fn c => C.isAlphaNum c orelse c = #"_" orelse c = #"'")
-              ss
-          val id = SS.string id
-        in
-          if (Option.isSome o HashArray.sub) (res, id) then
-            NONE
-          else
-            SOME (id, c + S.size id, ss)
-        end
-  in
-    fun id Id (s, l, c, ss) =
-          (case word (c, ss) of
-            NONE => NONE
-          | SOME (w, c', ss) =>
-              if SS.size ss > 0 andalso
-                (* only chars which are valid in path or long id but not id
-                 * needed for `open id+`
-                 * maybe a better check would be ws or =
-                 *)
-                (case SS.sub (ss, 0) of
-                  #"." => true | #"$" => true | #"/" => true
-                | _ => false)
-              then
-                NONE
-              else
-                SOME (w, mkLoc (s, l, c, l, c'), drop (s, l, c', ss)))
-      | id LongId (s, l, c, ss) =
-          let
-            fun f (c', ss, ws) =
-              case word (c', ss) of
-                NONE => NONE
-              | SOME (w, c', ss) =>
-                  if SS.size ss > 0 andalso SS.sub (ss, 0) = #"." then
-                    f (c' + 1, SS.triml 1 ss, w::ws)
-                  else
-                    SOME
-                      ( (S.concatWith "." o List.rev) (w::ws)
-                      , mkLoc (s, l, c, l, c')
-                      , drop (s, l, c', ss)
-                      )
-          in
-            f (c, ss, [])
-          end
+    val badSymbols = (V.fromList o map S)
+      [ "abstype", "andalso", "as", "case", "datatype", "do", "else"
+      , "exception", "fn", "fun", "handle" , "if", "infix", "infixr", "nonfix"
+      , "of", "op", "orelse", "raise", "rec", "sig", "struct", "then", "type"
+      , "val", "with", "withtype", "while"
+      ]
   end
 
-  local
-    (* todo: *)
-    fun string (s, l, c, ss) =
-      if SS.size ss < 2 orelse SS.sub (ss, 0) <> #"\"" then
-        NONE
-      else
-        let
-          val (str, ss) = SS.splitl (fn c => c <> #"\"") (SS.triml 1 ss)
-          val c' = c + SS.size str
-        in
-          SOME
-            ( SS.string str
-            , mkLoc (s, l, c, l, c')
-            , drop (s, l, c', SS.triml 1 ss)
-            )
-        end
+  fun ssEq a b = SS.size a = SS.size b andalso SS.compare (a, b) = EQUAL
 
-    (* todo: *)
-    val chars = "$()./-_"
-    fun simplePath (s, l, c, ss) =
-      let
-        val (p, ss) =
-          SS.splitl
-            (fn c => C.isAlphaNum c orelse CV.exists (fn c' => c = c') chars)
-            ss
-        fun f 0 = false
-          | f i =
-              case SS.sub (p, i) of
-                #"." => true
-              | #"/" => false
-              | _ => f (i - 1)
-      in
-        if SS.size p = 0 orelse (not o f) (SS.size p - 1) then
+  fun reserved w =
+    let
+      fun find i =
+        if i = V.length keywords then
           NONE
         else
           let
-            val c' = c + SS.size p
+            val (kw, t) = V.sub (keywords, i)
           in
-            SOME (SS.string p, mkLoc (s, l, c, l, c'), drop (s, l, c', ss))
+            if ssEq w kw then SOME t else find (i + 1)
           end
-      end
-  in
-    val ann = string
-
-    fun path s = case simplePath s of NONE => string s | z => z
-  end
-
-  fun chk w (s, l, c, ss) =
-    let
-      val sz = S.size w
     in
-      if
-        (sz = SS.size ss orelse
-        (sz < SS.size ss andalso (Char.isSpace o SS.sub) (ss, sz)))
-      andalso
-        (SS.string o SS.slice) (ss, 0, SOME sz) = w
-      then
-        SOME
-          ((), mkLoc (s, l, c, l, c + sz), drop (s, l, c + sz, SS.triml sz ss))
-      else
-        NONE
+      find 0
     end
 
-  fun res r =
-    chk
-      (case r of
-        Eq => "="
-      | Semi => ";"
-      | And => "and"
-      | Ann => "ann"
-      | Bas => "bas"
-      | Basis => "basis"
-      | End => "end"
-      | Functor => "functor"
-      | In => "in"
-      | Let => "let"
-      | Local => "local"
-      | Open => "open"
-      | Signature => "signature"
-      | Structure => "structure")
+  fun string (name, line, col, src) =
+    let
+      val sz = SS.size src
+
+      fun read (l, c, i) =
+        if i = sz then
+          NONE
+        else if SS.sub (src, i) = #"\n" then
+          SOME (SS.sub (src, i), (l + 1, 1, i + 1))
+        else
+          SOME (SS.sub (src, i), (l, c + 1, i + 1))
+
+      fun scan (l, c, i, res) =
+        if i = sz then
+          raise Lex (UnclosedString, polyLoc (name, line, col, l, c - 1))
+        else if SS.sub (src, i) = #"\"" then
+          (l, c + 1, i + 1, res)
+        else
+          case C.scan read (l, c, i) of
+            SOME (ch, (l, c, i)) => scan (l, c, i, ch::res)
+          | NONE =>
+              raise Lex
+                (if SS.sub (src, i) = #"\n" then
+                  (UnclosedString, polyLoc (name, line, col, l, c))
+                else
+                  ((BadChar o SS.sub) (src, i), polyLoc (name, l, c, l, c + 1)))
+
+      val (l, c, i, res) = scan (line, col + 1, 0, [])
+    in
+      (implode (rev res), l, c, SS.triml i src)
+    end
+
+  val isGoodChar =
+    fn #"$" => true
+     | #"(" => true
+     | #")" => true
+     | #"." => true
+     | #"/" => true
+     | #"-" => true
+     | #"_" => true
+     | #"'" => true
+     |   c  => Char.isAlphaNum c
+
+  fun word (col, src) =
+   let
+      fun f i =
+        if i < SS.size src andalso (isGoodChar o SS.sub) (src, i) then
+          f (i + 1)
+        else
+          i
+
+      val i =
+        if SS.sub (src, 0) = #"=" orelse SS.sub (src, 0) = #";" then
+          1
+        else
+          f 0
+      val (w, rest) = SS.splitAt (src, i)
+    in
+      (w, col + i, rest)
+    end
+
+  fun tokenize (state as { name, ... }) =
+    let
+      val { line, col, src, res } = skip state
+    in
+      if SS.size src = 0 then
+        let
+          val l = rev res
+          val eof = mkPos (line, col, line, col)
+          val start = case l of
+            [] => eof
+          | (_, p)::_ =>
+              let
+                val (l, c) = unpackStart p
+              in
+                mkPos (l, c, l, c)
+              end
+        in
+          (l, { start = start, eof = eof })
+        end
+      else if SS.sub (src, 0) = #"\"" then
+        let
+          val (w, l, c, src) = string (name, line, col, SS.triml 1 src)
+          val loc = mkPos (line, col, l, c)
+        in
+          tokenize
+            { name = name
+            , line = l
+            , col = c
+            , src = src
+            , res = (String w, loc) :: res
+            }
+        end
+      else
+        let
+          val (w, c, src) = word (col, src)
+          val l = line
+          val loc = mkPos (line, col, l, c)
+        in
+          if SS.size w = 0 then
+            raise Lex
+              ((BadChar o SS.sub) (src, 0), polyLoc (name, l, c, l, c + 1))
+          else
+            ();
+          case reserved w of
+            SOME t =>
+              tokenize
+                { name = name
+                , line = l
+                , col = c
+                , src = src
+                , res = (t, loc)::res
+                }
+          | NONE =>
+              if V.exists (ssEq w) badSymbols then
+                raise Lex (BadWord (SS.string w), toPolyLoc (name, loc))
+              else
+                tokenize
+                  { name = name
+                  , line = l
+                  , col = c
+                  , src = src
+                  , res = (Symbol (SS.string w), loc) :: res
+                  }
+        end
+    end
+
+  fun lex n s =
+    tokenize { name = n, line = 1, col = 1, src = SS.full s, res = [] }
 end

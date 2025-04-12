@@ -4,14 +4,14 @@ sig
    * withtype not allowed in signatures, see in struct for cleaner version.
    *)
   datatype dec_kind =
-    Basis of (string * (exp_kind * PolyML.location)) list
+    Ann of string list * (dec_kind * PolyML.location) list
+  | Basis of (string * (exp_kind * PolyML.location)) list
   | File of string
-  | Ann of string list * (dec_kind * PolyML.location) list
+  | Functor of (string * string) list
   | Local of (dec_kind * PolyML.location) list * (dec_kind * PolyML.location) list
   | Open of string list
-  | Structure of (string * string) list
   | Signature of (string * string) list
-  | Functor of (string * string) list
+  | Structure of (string * string) list
 
   and exp_kind =
     Bas of (dec_kind * PolyML.location) list
@@ -21,40 +21,41 @@ sig
   type dec = dec_kind * PolyML.location
   type exp = exp_kind * PolyML.location
 
+  structure Element :
+  sig
+    datatype t =
+      Dec | Ann | Basis | File | Functor | Local | Open | Signature | Structure
+    | Exp | Bas | Id | Let
+    | Token of Lex.token
+    | EOF
+
+    val toString : t -> string
+  end
+
   type t = dec list
 
-  type opts = { fileName : string, lineOffset : int }
-
-  datatype expected =
-    Dec
-  | Exp
-  | ShortId
-  | LongId
-  | String
-
-  datatype found =
-    EOS
-  | Invalid of string
-
-  type err = { expected : expected, found : found, at : PolyML.location }
+  type err =
+    { expected : Element.t list
+    , found : Element.t
+    , at : PolyML.location
+    } list
 
   exception Parse of err
 
-  val parse : opts -> string -> t
+  val parse : string -> Lex.t -> t
 end =
 struct
   structure L = Lex
-  structure T = L.Token
 
   datatype dec_kind =
-    Basis of (string * exp) list
+    Ann of string list * dec list
+  | Basis of (string * exp) list
   | File of string
-  | Ann of string list * dec list
+  | Functor of (string * string) list
   | Local of dec list * dec list
   | Open of string list
-  | Structure of (string * string) list
   | Signature of (string * string) list
-  | Functor of (string * string) list
+  | Structure of (string * string) list
 
   and exp_kind =
     Bas of dec list
@@ -64,252 +65,326 @@ struct
   withtype dec = dec_kind * PolyML.location
        and exp = exp_kind * PolyML.location
 
+  structure Element =
+  struct
+    datatype t =
+      Dec | Ann | Basis | File | Functor | Local | Open | Signature | Structure
+    | Exp | Bas | Let
+    | Id
+    | Token of Lex.token
+    | EOF
+
+    fun toString e =
+      case e of
+        Dec       => "declaration"
+      | Ann       => "annotated declaration"
+      | Basis     => "basis declaration"
+      | File      => "file path"
+      | Functor   => "functor declaration"
+      | Local     => "local/in declaration"
+      | Open      => "open bases"
+      | Signature => "signature declaration"
+      | Structure => "structure declaration"
+      | Exp       => "expression"
+      | Bas       => "bas expression"
+      | Id        => "identifier"
+      | Let       => "let/in expression"
+      | Token t   => "token " ^ L.toString t
+      | EOF       => "EOF"
+  end
+
+  structure E = Element
+
   type t = dec list
 
-  type opts = { fileName : string, lineOffset : int }
-
-  datatype expected =
-    Dec
-  | Exp
-  | ShortId
-  | LongId
-  | String
-
-  datatype found =
-    EOS
-  | Invalid of string
-
-  type err = { expected : expected, found : found, at : PolyML.location }
+  type err =
+    { expected : Element.t list
+    , found : Element.t
+    , at : PolyML.location
+    } list
 
   exception Parse of err
 
-  fun mkLoc (f, l, c, l', c') =
-    { file = f
-    , startLine = l, endLine = l'
-    , startPosition = c, endPosition = c'
-    }
+  local
+    val isIdChar =
+      fn #"'" => true
+       | #"_" => true
+       |   c  => Char.isAlphaNum c
 
-  type 'a parser = L.state -> 'a L.res
+    (* todo: mlton only allows $() for path variables
+     * see:
+     * https://github.com/MLton/mlton/blob/master/mlton/front-end/mlb.lex#L190
+     *)
+    val isPathChar =
+      fn #"$" => true
+       | #"(" => true
+       | #")" => true
+       | #"." => true
+       | #"/" => true
+       | #"-" => true
+       | #"_" => true
+       |   c  => Char.isAlphaNum c
+  in
+    fun isId "" = false
+      | isId s  = (Char.isAlpha o String.sub) (s, 0) andalso
+          CharVector.all isIdChar s
 
-  infix 2 <& &> <&>
-  infix 1 \ \:
+    fun isPath "" = false
+      | isPath s  = CharVector.all isPathChar s
+  end
 
-  (* mandatory *)
-  fun ! e p (src as (_, _, _, ss)) =
-    case p src of
-      NONE =>
+  type state = (string * L.position) * (L.token * L.position) list * L.position
+
+  fun getPos (_, (_, l)::_, _) = l
+    | getPos ((_, l), _, _) = l
+
+  fun getPrevPos (_, _, l) = l
+
+  (* pop next token *)
+  fun ~ (z, (_, l)::ts, _) = (z, ts, l)
+    | ~ s = s
+
+  fun == (s1 : state, s2 : state) =
+    case (#2 s1, #2 s2) of
+      ([], []) => true
+    | ((_, l1)::_, (_, l2)::_) => l1 = l2
+    | _ => false
+
+  infix ==
+
+  datatype 'a res =
+    S of state * 'a * L.position
+  | F of state * (E.t list * E.t * L.position) list
+
+  type 'a parser = state -> 'a res
+
+  fun toExn (((n, _), _, _), l) =
+    map (fn (e, f, a) => { expected = e, found = f, at = L.toPolyLoc (n, a) }) l
+
+  fun err exp (s as ((_, p), ts, _)) =
+    case ts of
+      [] => F (s, [(exp, E.EOF, p)])
+    | (t, p)::_ => F (s, [(exp, E.Token t, p)])
+
+  infix 4 <|>
+  infix 3 <& <&> &>
+  infix 2 \ \:
+  infix 1 <!>
+  infixr $
+
+  fun f $ x = f x
+
+  (* raise on error *)
+  fun (p1 <!> e) s =
+    case p1 s of
+      z as (S _) => z
+    | F (_, l) =>
         let
-          val (s, loc) = L.any src
-          val f = if Substring.size ss = 0 then EOS else Invalid s
+          val x =
+            case s of
+              ((_, p), [], _) => (e, E.EOF, p)
+            | (_, (t, p)::_, _) => (e, E.Token t, p)
         in
-          raise Parse { expected = e, found = f, at = loc }
+          raise (Parse o toExn) (s, x::l)
         end
-    | z => z
+
+  (* push error *)
+  fun (p1 <|> e) s =
+    case p1 s of
+      z as (S _) => z
+    | F (_, l) =>
+        let
+          val x =
+            case s of
+              ((_, p), [], _) => (e, E.EOF, p)
+            | (_, (t, p)::_, _) => (e, E.Token t, p)
+        in
+          F (s, x::l)
+        end
 
   (* discard 2nd *)
-  fun (p1 <& (p2 : 'a parser)) (src as (p, l, c, _)) =
-    case p1 src of
-      NONE => NONE
-    | SOME (r, _, src) =>
-        (case p2 src of
-          NONE => NONE
-        | SOME (_, { endLine, endPosition, ... }, src) =>
-            SOME (r, mkLoc (p, l, c, endLine, endPosition), src))
+  fun (p1 <& p2) s =
+    case p1 s of
+      F z => F z
+    | S (s, r, l) =>
+        (case p2 s of
+          F z => F z
+        | S (s, _, l') => S (s, r, L.joinPos (l, l')))
 
   (* discard 1st *)
-  fun (p1 &> (p2 : 'a parser)) (src as (p, l, c, _)) =
-    case p1 src of
-      NONE => NONE
-    | SOME (_, _, src) =>
-        (case p2 src of
-          NONE => NONE
-        | SOME (r, { endLine, endPosition, ... }, src) =>
-            SOME (r, mkLoc (p, l, c, endLine, endPosition), src))
+  fun (p1 &> p2) s =
+    case p1 s of
+      F z => F z
+    | S (s, _, l) =>
+        (case p2 s of
+          F z => F z
+        | S (s, r, l') => S (s, r, L.joinPos (l, l')))
 
   (* combine *)
-  fun (p1 <&> (p2 : 'a parser)) (src as (p, l, c, _)) =
-    case p1 src of
-      NONE => NONE
-    | SOME (r1, _, src) =>
-        (case p2 src of
-          NONE => NONE
-        | SOME (r2, { endLine, endPosition, ... }, src) =>
-            SOME ((r1, r2), mkLoc (p, l, c, endLine, endPosition), src))
+  fun (p1 <&> p2) s =
+    case p1 s of
+      F z => F z
+    | S (s, r, l) =>
+        (case p2 s of
+          F z => F z
+        | S (s, r', l') => S (s, (r, r'), L.joinPos (l, l')))
 
   (* map *)
-  fun (p \ f) src =
-    case p src of
-      NONE => NONE
-    | SOME (r, l, src) => SOME (f r, l, src)
+  fun (p \ f) s =
+    case p s of
+      S (s, r, l) => S (s, f r, l)
+    | F z => F z
 
-  (* map with location *)
-  fun (p \: f) src =
-    case p src of
-      NONE => NONE
-    | SOME (r, l, src) => SOME (f (r, l), l, src)
+  (* map with position *)
+  fun (p \: f) s =
+    case p s of
+      S (s, r, l) => S (s, f (r, L.toPolyLoc ((#1 o #1) s, l)), l)
+    | F z => F z
 
-  fun any ps src =
+  (* maybe, plus and star will propagate failures that accepted at least one
+   * token, i.e all or nothing.
+   *)
+
+  fun maybe p s =
+    case p s of
+      S (s, r, l) => S (s, SOME r, l)
+    | F z => if #1 z == s then S (s, NONE, getPrevPos s) else F z
+
+  fun plus p s =
     let
-      fun f [] = NONE
-        | f (p::ps) =
-            case p src of
-              NONE => f ps
-            | r => r
+      fun f (s', rs, l) =
+        case p s' of
+          S (s', r, l) => f (s', r::rs, l)
+        | F z =>
+            if #1 z == s' then S (s', rev rs, L.joinPos (getPos s, l)) else F z
     in
-      f ps
+      case p s of
+        S (s, r, l) => f (s, [r], l)
+      | F z => F z
     end
 
-  fun seq (ps : 'a parser list) (src as (s, l, c, _)) =
+  fun star p s =
     let
-      fun f ([], src, l', c', rs) =
-            SOME (List.rev rs, mkLoc (s, l, c, l', c'), src)
-        | f (p::ps, src, _, _, rs) =
-            case p src of
-              NONE => NONE
-            | SOME (r, loc as { endLine, endPosition, ... }, src) =>
-                f (ps, src, endLine, endPosition, (r, loc)::rs)
+      fun f (s', rs, l) =
+        case p s' of
+          S (s', r, l) => f (s', r::rs, l)
+        | F z =>
+            if #1 z == s' then S (s', rev rs, L.joinPos (getPos s, l)) else F z
     in
-      f (ps, src, l, c, [])
+      case p s of
+        S (s, r, l) => f (s, [r], l)
+      | F z => if #1 z == s then S (s, [], getPrevPos s) else F z
     end
 
-  fun star (p : 'a parser) (src as (s, l, c, _)) =
+  fun skip p s =
     let
-      fun f (src, l', c', rs) =
-        case p src of
-          NONE => SOME (List.rev rs, mkLoc (s, l, c, l', c'), src)
-        | SOME (r,  { endLine, endPosition, ... }, src) =>
-            f (src, endLine, endPosition, r::rs)
+      fun f s' =
+        case p s' of
+          S (s', _, _) => f s'
+        | F z => if #1 z == s' then S (s', (), getPrevPos s) else F z
     in
-      f (src, l, c, [])
+      f s
     end
 
-  fun plus (p : 'a parser) (src as (s, l, c, _)) =
-    let
-      fun f (src, l', c', rs) =
-        case p src of
-          NONE => SOME (List.rev rs, mkLoc (s, l, c, l', c'), src)
-        | SOME (r, { endLine, endPosition, ... }, src) =>
-            f (src, endLine, endPosition, r::rs)
-    in
-      case p src of
-        NONE => NONE
-      | SOME (r, { endLine, endPosition, ... }, src) =>
-          f (src, endLine, endPosition, [r])
-    end
+  fun ` kw (s as (_, (t, l)::_, _)) =
+        if kw = t then S (~s, (), l) else err [E.Token kw] s
+    | ` kw s = err [E.Token kw] s
 
-  fun until p1 (p2 : 'a parser) (src as (s, l, c, _)) =
-    let
-      fun f (src, l', c', rs) =
-        case p1 src of
-          NONE =>
-            (case p2 src of
-              NONE => NONE
-            | SOME (r, { endLine, endPosition, ... }, src) =>
-                f (src, endLine, endPosition, r::rs))
-        | SOME (_, _, src) =>
-            SOME (List.rev rs, mkLoc (s, l, c, l', c'), src)
-    in
-      f (src, l, c, [])
-    end
+  fun str s =
+    case #2 s of
+      (L.String r, l)::_ => S (~s, r, l)
+    | _ => err [E.Token (L.String "")] s
 
-  fun maybe p (src as (s, l, c, _)) =
-    case p src of
-      NONE => SOME (NONE, mkLoc (s, l, c, l, c), src)
-    | SOME (r, loc, src) => SOME (SOME r, loc, src)
+  fun id s =
+    case #2 s of
+      (L.Symbol r, l)::_ => if isId r then S (~s, r, l) else err [E.Id] s
+    | _ => err [E.Id] s
 
-  fun id k src =
+  fun binds kw s =
     let
-      val e = case k of T.Id => ShortId | T.LongId => LongId
-    in
-      ! e (L.id k) src
-    end
-
-  fun bind (base, idKind) =
-    let
-      fun f kw =
-        (L.res kw &> id idKind) <&> maybe (L.res T.Eq &> id idKind)
+      fun bind kw =
+        `kw &> id <&> maybe (`L.Eq &> id)
         \ (fn (z, opt) => (z, getOpt (opt, z)))
     in
-      f base <&> star (f T.And) \ op::
+      bind kw <&> star (bind L.And) \ op:: $ s
     end
 
-  val inp = L.res T.In
-
-  val endp = L.res T.End
-
-  fun basBind src =
+  fun basBind s =
     let
-      fun f kw = L.res kw &> id T.Id <& L.res T.Eq <&> exp
+      fun bind kw = `kw &> id <& `L.Eq <&> exp
     in
-      (f T.Basis <&> star (f T.And) \ op:: \ Basis) src
+      bind L.Basis <&> star (bind L.And) \ Basis o op:: <!> [E.Basis] $ s
     end
 
-  and strBind src = (bind (T.Structure, T.LongId) \ Structure) src
+  and ann s =
+    `L.Ann &> plus str <& `L.In <|> [E.Token (L.String ""), E.Token L.In]
+      <&> decs L.End
+    \ Ann <!> [E.Ann]
+    $ s
 
-  and sigBind src = (bind (T.Signature, T.Id) \ Signature) src
+   and file s =
+    case #2 s of
+      (L.String r, p)::_ => S (~s, File r, p)
+    | (L.Symbol r, p)::_ =>
+        if isPath r then S (~s, File r, p) else err [E.File] s
+    | _ => err [E.File] s
 
-  and funBind src = (bind (T.Functor, T.Id) \ Functor) src
+  and funBind s = binds L.Functor \ Functor <!> [E.Functor] $ s
 
-  and localIn src =
-    ( L.res T.Local &> decs inp <&> decs endp
-    \ Local
-    ) src
+  and localIn s =
+    `L.Local &> decs L.In <&> decs L.End \ Local <!> [E.Local] $ s
 
-  and openBas src =
-    ( L.res T.Open &> ! ShortId (plus (L.id T.Id))
-    \ Open
-    ) src
+  and openBas s = `L.Open &> plus id \ Open <!> [E.Open] $ s
 
-  and ann src =
-    ( L.res T.Ann &> ! String (plus L.ann) <& inp <&> decs endp
-    \ Ann
-    ) src
+  and sigBind s = binds L.Signature \ Signature <!> [E.Signature] $ s
 
-  and file src = (L.path \ File) src
+  and strBind s = binds L.Structure \ Structure <!> [E.Structure] $ s
 
-  and dec src  =
-    (any [basBind, strBind, sigBind, funBind, localIn, openBas, ann, file]
-    \: (fn (r, loc) => (r, loc))) src
+  and dec s =
+    skip (`L.Semi) &> (fn s =>
+      (case #2 s of
+        [] => err [E.Dec]
+      | t::_ =>
+          (case t of
+            (L.Ann, _)       => ann
+          | (L.Basis, _)     => basBind
+          | (L.Functor, _)   => funBind
+          | (L.Local, _)     => localIn
+          | (L.Open, _)      => openBas
+          | (L.Signature, _) => sigBind
+          | (L.Structure, _) => strBind
+          | (L.String _, _)  => file
+          | (L.Symbol _, _)  => file
+          | _ => fn _ => F (s, [])) <|> [E.Dec]
+          \: (fn z => z))
+      $ s) <& skip (`L.Semi)
+    $ s
 
-  and decs p src = until p dec src
+  and decs kw s = star dec <& `kw <|> [E.Dec, E.Token kw] $ s
 
-  and basExp src =
-    (L.res T.Bas &> decs endp \ Bas) src
+  and basExp s = `L.Bas &> decs L.End \ Bas <!> [E.Bas] $ s
 
-  and letIn src =
-    (L.res T.Let &> decs inp <&> exp <& endp \ Let) src
+  and letIn s = `L.Let &> decs L.In <&> exp <& `L.End \ Let <!> [E.Let] $ s
 
-  and basId src = (L.id T.Id \ Id) src
+  and basId s = id \ Id $ s
 
-  and exp src =
-    (! Exp (any [basExp, letIn, basId] \: (fn (r, loc) => (r, loc)))) src
+  and exp s =
+    (case #2 s of
+      [] => err [E.Exp]
+    | t::_ =>
+        (case t of
+          (L.Bas, _)      => basExp
+        | (L.Let, _)      => letIn
+        | (L.Symbol _, _) => basId
+        | _ => fn _ => F (s, [])) <|> [E.Exp]
+        \: (fn z => z))
+    $ s
 
-  local
-    fun find (f, l, v) =
-      let
-        fun fd [] = NONE
-          | fd (x::xs) = case f x of NONE => fd xs | z => z
-      in
-        Option.getOpt (fd l, v)
-      end
-
-    fun check (z, src as (_, _, _, ss)) =
-      if Substring.size ss = 0 then
-        z
-      else
-        let
-          val (s, loc) = L.any src
-        in
-          raise Parse { expected = Dec, found = Invalid s, at = loc }
-        end
-  in
-    fun parse { fileName, lineOffset } s =
-      let
-        val src = (fileName, lineOffset + 1, 0, Substring.full s)
-      in
-        case (star dec o L.drop) src of
-          NONE => check ([], src)
-        | SOME (r, _, src) => check (r, src)
-      end
-  end
+  fun parse name (tokens, { start, eof }) =
+    case star dec ((name, eof), tokens, start) of
+      F z => raise Parse (toExn z)
+    | S (s, r, _) =>
+        (case #2 s of
+          [] => r
+        | (t, p)::_ => raise (Parse o toExn) (s, [([E.Dec], E.Token t, p)]))
 end
