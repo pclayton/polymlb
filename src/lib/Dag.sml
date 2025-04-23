@@ -2,6 +2,7 @@ structure Dag :
 sig
   datatype node = N of int * node vector
 
+  (* The root basis has an id of 0. *)
   type t =
     { root   : node
     , leaves : node vector
@@ -182,17 +183,6 @@ struct
     in
       idx (l, 0)
     end
-
-  fun upd (h, k, v, id) =
-    case H.sub (h, k) of
-      SOME m => H.update (m, v, id)
-    | NONE =>
-        let
-          val m : int H.hash = H.hash 10
-        in
-          H.update (m, v, id);
-          H.update (h, k, m)
-        end
 
   datatype z = datatype Basis.dec
   datatype z = datatype Basis.exp
@@ -424,7 +414,7 @@ struct
       val (log, parse) =
         case logger of
           NONE => (fn _ => (), f)
-        | SOME { pathFmt, print} =>
+        | SOME { pathFmt, print } =>
             ( fn m => print (Log.Debug, fn () => m)
             , fn s => (print (Log.Debug, fn () => "parsing " ^ pathFmt s); f s)
             )
