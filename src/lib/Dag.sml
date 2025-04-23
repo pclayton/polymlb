@@ -6,10 +6,9 @@ sig
     { root   : node
     , leaves : node vector
     , bases  : Basis.t vector
+    , paths  : string vector
       (* raises on invalid path *)
     , id     : string -> int
-      (* raises on invalid id *)
-    , path   : int -> string
     }
 
   datatype err = Cycle of string list
@@ -155,8 +154,8 @@ struct
     { root   : node
     , leaves : node vector
     , bases  : Basis.t vector
+    , paths  : string vector
     , id     : string -> int
-    , path   : int -> string
     }
 
   type ir =
@@ -414,8 +413,8 @@ struct
         { root   = dep 0
         , leaves = V.tabulate (B.cnt leaves, fn i => (rev o B.sub) (leaves, i))
         , bases  = bases
+        , paths  = paths
         , id     = fn s => (valOf o H.sub) (ids, s)
-        , path   = fn i => V.sub (paths, i)
         }
       end
   end

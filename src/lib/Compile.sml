@@ -253,7 +253,7 @@ struct
     | logElab (SOME { pathFmt, print }) p =
         print (Log.Info, fn () => "elaborating " ^ pathFmt p)
 
-  fun serialDeps log ({ root as D.N (r, _), bases, id, path, ... } : D.t) =
+  fun serialDeps log ({ root as D.N (r, _), bases, paths, id, ... } : D.t) =
     let
       val nss : NS.t option array = A.array (V.length bases, NONE)
 
@@ -272,7 +272,7 @@ struct
             in
               A.update (nss, p, SOME ns);
               V.app f deps;
-              logElab log (path p);
+              (logElab log o V.sub) (paths, p);
               (cont o compileBas log (SOME ns) p o V.sub) (bases, p);
               ()
             end
@@ -281,7 +281,7 @@ struct
       (valOf o A.sub) (nss, r)
     end
 
-  fun serialEncounter log ({ root = D.N (r,  _), bases, id, path, ... } : D.t) =
+  fun serialEncounter log ({ root = D.N (r,  _), bases, paths, id, ... } : D.t) =
     let
       val nss : NS.t option array = A.array (V.length bases, NONE)
 
@@ -301,11 +301,11 @@ struct
                   end
             end
     in
-      logElab log (path r);
+      (logElab log o V.sub) (paths, r);
       (cont o compileBas log NONE r o V.sub) (bases, r)
     end
 
-  fun parDeps jobs log ({ root as D.N (s, _), leaves, bases, id, path } : D.t) =
+  fun parDeps jobs log { root as D.N (s, _), leaves, bases, paths, id } =
     let
       val counts = A.tabulate (V.length bases, fn _ => (M.mutex (), ref ~1))
       val nss = A.tabulate (V.length bases, fn _ => NS.empty ())
@@ -342,7 +342,7 @@ struct
         end
 
       and comp (D.N (s, revs)) () =
-        ( logElab log (path s)
+        ( (logElab log o V.sub) (paths, s)
         ; (cont o compileBas log ((SOME o A.sub) (nss, s)) s o V.sub) (bases, s)
         ; V.app postDep revs
         )
@@ -354,7 +354,7 @@ struct
       | SOME e => raise e
     end
 
-  fun parConc jobs log ({ root as D.N (s, _), leaves, bases, id, path } : D.t) =
+  fun parConc jobs log { root as D.N (s, _), leaves, bases, paths, id } =
     let
       type c = int * (int * int) cont
 
@@ -412,7 +412,7 @@ struct
             ( A.update (prios, s, ~1)
             ; PTP.submit
                 (tp, (p, fn () =>
-                  ( logElab log (path s)
+                  ( (logElab log o V.sub) (paths, s)
                   ; ( cont
                     o compileBas log ((SOME o V.sub) (nss, s)) (p, s)
                     o V.sub
