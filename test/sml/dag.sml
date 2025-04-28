@@ -116,7 +116,7 @@ in
   val _ =
   "Dag.process reduces input graph"
   assert
-    #root (process b "b1")
+    (#root o #dag o process b) "b1"
   eq
     D.N (0, fl
       [ D.N (1, fl

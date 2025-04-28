@@ -2,14 +2,17 @@ structure Dag :
 sig
   datatype node = N of int * node vector
 
+  type dag = { root : node, leaves : node vector }
+
   (* The root basis has an id of 0. *)
   type t =
-    { root   : node
-    , leaves : node vector
-    , bases  : Basis.t vector
-    , paths  : string vector
+    (* potentially reduced *)
+    { dag   : dag
+    , full  : dag
+    , bases : Basis.t vector
+    , paths : string vector
       (* raises on invalid path *)
-    , id     : string -> int
+    , id    : string -> int
     }
 
   datatype err = Cycle of string list
@@ -151,20 +154,14 @@ struct
 
   datatype node = N of int * node vector
 
-  type t =
-    { root   : node
-    , leaves : node vector
-    , bases  : Basis.t vector
-    , paths  : string vector
-    , id     : string -> int
-    }
+  type dag = { root : node, leaves : node vector }
 
-  type ir =
-    { bases : Basis.t vector
+  type t =
+    { dag   : dag
+    , full  : dag
+    , bases : Basis.t vector
     , paths : string vector
-    , ids   : int H.hash
-    , deps  : int B.t B.t
-    , revs  : int B.t B.t
+    , id    : string -> int
     }
 
   datatype err = Cycle of string list
@@ -192,7 +189,7 @@ struct
   (* Depth first so that any cycle found is the first one when reading
    * sequentially from the root.
    *)
-  fun traverse getBas root : ir =
+  fun traverse (getBas, root) =
     let
       val bases : Basis.t B.t = B.new (baseSize * 2, [])
       val paths : string B.t = B.new (baseSize * 2, "")
@@ -282,9 +279,8 @@ struct
         loop' 0
       end
   in
-    fun reduce (ir as { bases, deps, revs, ... } : ir) : ir =
+    fun reduce { sz, deps, revs } : unit =
       let
-        val sz = V.length bases
         val m = M.new sz
         val s = S.new sz
 
@@ -348,8 +344,7 @@ struct
               ()));
 
         (* delete from the graph *)
-        update 0;
-        ir
+        update 0
       end
   end
 
@@ -357,10 +352,10 @@ struct
     val dummy = N (~1, V.fromList [])
     fun isDummy (N (i, _)) = i = ~1
   in
-    fun mkDag ({ bases, paths, ids, deps, revs } : ir) : t =
+    fun mkDag { sz, deps, revs } : dag =
       let
-        val ndeps  = A.array (V.length bases, dummy)
-        val nrevs  = A.array (V.length bases, dummy)
+        val ndeps  = A.array (sz, dummy)
+        val nrevs  = A.array (sz, dummy)
         val leaves = B.new (baseSize, ~1)
 
         fun dep id =
@@ -402,9 +397,6 @@ struct
       in
         { root   = dep 0
         , leaves = V.tabulate (B.cnt leaves, fn i => (rev o B.sub) (leaves, i))
-        , bases  = bases
-        , paths  = paths
-        , id     = fn s => (valOf o H.sub) (ids, s)
         }
       end
   end
@@ -418,14 +410,26 @@ struct
             ( fn m => print (Log.Debug, fn () => m)
             , fn s => (print (Log.Debug, fn () => "parsing " ^ pathFmt s); f s)
             )
-      fun (m @ f) z = (log m; f z)
-    in
-      ( "building MLB graph"   @ mkDag
-      o (if red then
-          "reducing MLB graph" @ reduce
+
+      val { bases, paths, ids, deps, revs } =
+        (log "traversing MLB graph"; traverse (parse, s))
+      val bs = { sz = V.length bases, deps = deps, revs = revs }
+      val full = (log "building MLBgraph"; mkDag bs)
+      val dag =
+        if not red then
+          full
         else
-          (fn x => x))
-      o "traversing MLB graph" @ traverse parse
-      ) s
+          ( log "reducing MLB graph"
+          ; reduce bs
+          ; log "building reduced MLB graph"
+          ; mkDag bs
+          )
+    in
+      { dag   = dag
+      , full  = full
+      , bases = bases
+      , paths = paths
+      , id    = fn s => (valOf o H.sub) (ids, s)
+      }
     end
 end

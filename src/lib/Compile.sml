@@ -253,7 +253,7 @@ struct
     | logElab (SOME { pathFmt, print }) p =
         print (Log.Info, fn () => "elaborating " ^ pathFmt p)
 
-  fun serialDeps log ({ root as D.N (r, _), bases, paths, id, ... } : D.t) =
+  fun serialDeps log ({ dag = { root as D.N (r, _), ... }, bases, paths, id, ... } : D.t) =
     let
       val nss : NS.t option array = A.array (V.length bases, NONE)
 
@@ -281,7 +281,7 @@ struct
       (valOf o A.sub) (nss, r)
     end
 
-  fun serialEncounter log ({ root = D.N (r,  _), bases, paths, id, ... } : D.t) =
+  fun serialEncounter log ({ dag = { root = D.N (r,  _), ... }, bases, paths, id, ... } : D.t) =
     let
       val nss : NS.t option array = A.array (V.length bases, NONE)
 
@@ -305,7 +305,7 @@ struct
       (cont o compileBas log NONE r o V.sub) (bases, r)
     end
 
-  fun parDeps jobs log { root as D.N (s, _), leaves, bases, paths, id } =
+  fun parDeps jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, id, ... } : Dag.t) =
     let
       val counts = A.tabulate (V.length bases, fn _ => (M.mutex (), ref ~1))
       val nss = A.tabulate (V.length bases, fn _ => NS.empty ())
@@ -354,7 +354,7 @@ struct
       | SOME e => raise e
     end
 
-  fun parConc jobs log { root as D.N (s, _), leaves, bases, paths, id } =
+  fun parConc jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, id, ... } : Dag.t) =
     let
       type c = int * (int * int) cont
 
