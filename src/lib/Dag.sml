@@ -43,6 +43,27 @@ struct
   structure L  = List
   structure V  = Vector
 
+  datatype node = N of int * node vector
+
+  type dag = { root : node, leaves : node vector }
+
+  type t =
+    { dag   : dag
+    , full  : dag
+    , bases : Basis.t vector
+    , paths : string vector
+    , id    : string -> int
+    }
+
+  datatype err = Cycle of string list
+
+  exception Dag of err
+
+  type opts =
+    { logger : Log.logger option
+    , reduce : bool
+    }
+
   structure Buffer :>
   sig
     type 'a t
@@ -151,27 +172,6 @@ struct
   structure B = Buffer
   structure S = Set
   structure M = Matrix
-
-  datatype node = N of int * node vector
-
-  type dag = { root : node, leaves : node vector }
-
-  type t =
-    { dag   : dag
-    , full  : dag
-    , bases : Basis.t vector
-    , paths : string vector
-    , id    : string -> int
-    }
-
-  datatype err = Cycle of string list
-
-  exception Dag of err
-
-  type opts =
-    { logger : Log.logger option
-    , reduce : bool
-    }
 
   fun index (l, s) =
     let
