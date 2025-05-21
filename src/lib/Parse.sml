@@ -156,8 +156,6 @@ struct
     S of state * 'a * L.position
   | F of state * (E.t list * E.t * L.position) list
 
-  type 'a parser = state -> 'a res
-
   fun toExn (((n, _), _, _), l) =
     map (fn (e, f, a) => { expected = e, found = f, at = L.toPolyLoc (n, a) }) l
 
