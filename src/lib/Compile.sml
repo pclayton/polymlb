@@ -148,7 +148,7 @@ struct
     datatype z = datatype Basis.dec
     datatype z = datatype Basis.exp
   in
-    fun compileBas log ns ret ds =
+    fun compileBas log ret ds =
       let
         (* addendum to the above about compileBas: declaration scopes (e.g
          * annotations or local/in) are also implemented with continuations,
@@ -260,9 +260,63 @@ struct
             dec ds
           end
       in
-        elab ([], []) (getOpt (ns, NS.empty ()), ds, fn ns => Done (ret, ns))
+        elab ([], []) (NS.empty (), ds, fn ns => Done (ret, ns))
       end
   end
+
+  (* All driver functions are passed in a namespace array, which will contain
+   * the namespaces resulting from MLB elaboration and is indexed by dag ids.
+   *)
+
+  structure NameSpaceArray :>
+  sig
+    type t
+    (* whether to make threadsafe *)
+    val new  : Dag.t * bool -> t
+    val sub  : t * int -> NS.t
+    val sub' : t * string -> NS.t
+    val get  : t * int -> NS.t option
+    val set  : t * int * NS.t -> unit
+  end =
+  struct
+    type t =
+      { a : NS.t option array
+      , m : M.mutex option
+      , paths : string vector
+      , getId : (string -> int)
+      }
+
+    fun new ({ paths, getId, ... } : Dag.t, b) =
+      { m = if b then (SOME o M.mutex) () else NONE
+      , a = A.array (V.length paths, NONE)
+      , paths = paths
+      , getId = getId
+      }
+
+    (* double checked locking? *)
+    val lock = Option.app M.lock
+    val unlock = Option.app M.unlock
+
+    fun sub ({ a, m, paths, ... } : t, i) =
+      case (lock m; A.sub (a, i) before unlock m) of
+        NONE => raise (Compile o Dependency o V.sub) (paths, i)
+      | SOME ns => ns
+
+    fun sub' (t, s) = sub (t, #getId t s)
+
+    fun get ({ a, m, ... } : t, i) = (lock m; A.sub (a, i) before unlock m)
+
+    fun set ({ a, m, paths, ... } : t, i, ns) =
+      if (lock m; (isSome o A.sub) (a, i)) then
+        ( unlock m
+        ; raise Fail
+            ("Compile.NameSpaceArray.set: illegal set for " ^ V.sub (paths, i))
+        )
+      else
+        A.update (a, i, SOME ns) before unlock m
+  end
+
+  structure NSA = NameSpaceArray
 
   fun logElab NONE _ = ()
     | logElab (SOME { pathFmt, print }) p =
@@ -270,180 +324,151 @@ struct
 
   (* Driver functions. *)
 
-  fun serialDeps log ({ dag = { root as D.N (r, _), ... }, bases, paths, getId, ... } : D.t) =
+  fun serialDeps (log, nsa, { dag = { root, ... }, bases, paths, ... } : D.t) =
     let
-      val nss : NS.t option array = A.array (V.length bases, NONE)
+      fun cont (Done (id, ns)) = NSA.set (nsa, id, ns)
+        | cont (Cont (_, p, f)) = (cont o f o NSA.sub') (nsa, p)
 
-      fun cont (Done _) = ()
-        | cont (Cont (_, p, f)) =
-            case A.sub (nss, getId p) of
-              SOME ns => cont (f ns)
-            | NONE => raise Compile (Dependency p)
-
-      fun f (D.N (p, deps)) =
-        case A.sub (nss, p) of
-          SOME _ => ()
-        | NONE =>
-            let
-              val ns = NS.empty ()
-            in
-              A.update (nss, p, SOME ns);
-              V.app f deps;
-              (logElab log o V.sub) (paths, p);
-              (cont o compileBas log (SOME ns) p o V.sub) (bases, p);
-              ()
-            end
-    in
-      f root;
-      (valOf o A.sub) (nss, r)
+      fun comp (D.N (id, deps)) =
+        if (isSome o NSA.get) (nsa, id) then
+          ()
+        else
+          ( V.app comp deps
+          ; (logElab log o V.sub) (paths, id)
+          ; (cont o compileBas log id o V.sub) (bases, id)
+          )
+     in
+      comp root;
+      NSA.sub (nsa, 0)
     end
 
-  fun serialEncounter log ({ dag = { root = D.N (r,  _), ... }, bases, paths, getId, ... } : D.t) =
+  fun serialEncounter (log, nsa, { bases, paths, getId, ... } : D.t) =
     let
-      val nss : NS.t option array = A.array (V.length bases, NONE)
-
-      fun cont (Done (p, ns)) = ns before A.update (nss, p, SOME ns)
+      fun cont (Done (id, ns)) = ns before NSA.set (nsa, id, ns)
         | cont (Cont (_, p, f)) =
             let
-              val i = getId p
+              val id = getId p
             in
-              case A.sub (nss, i) of
+              case NSA.get (nsa, id) of
                 SOME ns => cont (f ns)
               | NONE =>
-                  let
-                    val _ = logElab log p
-                    val ns = (cont o compileBas log NONE i o V.sub) (bases, i)
-                  in
-                    cont (f ns)
-                  end
+                  ( logElab log p
+                  ; (cont o f o cont o compileBas log id o V.sub) (bases, id)
+                  )
             end
     in
-      (logElab log o V.sub) (paths, r);
-      (cont o compileBas log NONE r o V.sub) (bases, r)
+      (logElab log o V.sub) (paths, 0);
+      (cont o compileBas log 0 o V.sub) (bases, 0)
     end
 
-  fun parDeps jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, getId, ... } : Dag.t) =
+  fun parDeps jobs (log, nsa, { dag = { root, leaves }, bases, paths, ... } : D.t) =
     let
-      val counts = A.tabulate (V.length bases, fn _ => (M.mutex (), ref ~1))
-      val nss = A.tabulate (V.length bases, fn _ => NS.empty ())
-      val tp = FTP.new jobs
+      val started = BA.array (V.length bases, false)
+      val counts  = A.tabulate (V.length bases, fn _ => (M.mutex (), ref ~1))
+      val tp      = FTP.new jobs
 
-       fun doCounts (D.N (s, v)) =
+       fun doCounts (D.N (id, deps)) =
         let
-          val (_, r) = A.sub (counts, s)
+          val (_, r) = A.sub (counts, id)
         in
-          if !r > ~1 then
-            ()
-          else
-            r := V.length v;
-            V.app doCounts v
+          if !r > ~1 then () else (r := V.length deps; V.app doCounts deps)
         end
 
-      fun cont (Cont (_, p, f)) = (cont o f o A.sub) (nss, getId p)
-        | cont _ = ()
+      fun cont (Done (id, ns)) = NSA.set (nsa, id, ns)
+        | cont (Cont (_, p, f)) = (cont o f o NSA.sub') (nsa, p)
 
-      fun postDep (n as D.N (s, _)) =
-        let
-          val (m, r) = A.sub (counts, s)
-        in
-          if !r <= 0 then
-            FTP.submit (tp, comp n)
-          else
-            ( M.lock m
-            ; r := !r - 1
-            ; if !r = 0 before M.unlock m then
-                FTP.submit (tp, comp n)
-              else
-                ()
-            )
-        end
-
-      and comp (D.N (s, revs)) () =
-        ( (logElab log o V.sub) (paths, s)
-        ; (cont o compileBas log ((SOME o A.sub) (nss, s)) s o V.sub) (bases, s)
-        ; V.app postDep revs
+      fun elab id =
+        ( (logElab log o V.sub) (paths, id)
+        ; (cont o compileBas log id o V.sub) (bases, id)
         )
+
+      fun postComp (n as D.N (id, _)) =
+        let
+          val (m, r) = A.sub (counts, id)
+        in
+          M.lock m;
+          r := !r - 1;
+          if !r = 0 before M.unlock m then
+            FTP.submit (tp, fn () => comp n)
+          else
+            ()
+        end
+
+      (* no lock on started since it's only accessed from the original thread *)
+      and comp (D.N (id, revs)) =
+        if BA.sub (started, id) then
+          ()
+        else
+          ( BA.update (started, id, true)
+          ; FTP.submit (tp, fn () => (elab id; V.app postComp revs))
+          )
     in
       doCounts root;
-      V.app (fn n => comp n ()) leaves;
+      V.app comp leaves;
       case FTP.wait tp of
-        NONE => A.sub (nss, s)
-      | SOME e => raise e
+        NONE => NSA.sub (nsa, 0)
+      | SOME e => PolyML.Exception.reraise e
     end
 
-  fun parConc jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, getId, ... } : Dag.t) =
+  fun parConc jobs (log, nsa, { dag = { root, leaves }, bases, paths, getId, ... } : D.t) =
     let
-      type c = FixedInt.int * (FixedInt.int * int) cont
-
-      val sz    = V.length bases
+      type c    = FixedInt.int * (FixedInt.int * int) cont
       val m     = M.mutex ()
-      val dones = BA.array (sz, false)
-      val conts = A.tabulate (sz, fn _ => ([] : c list))
-      val nss   = V.tabulate (sz, fn _ => NS.empty ())
-      val prios = A.array (sz, ~1 : FixedInt.int)
+      val conts = A.tabulate (V.length bases, fn _ => ([] : c list))
+      val prios = A.array (V.length bases, ~1 : FixedInt.int)
+      val tp    = PTP.new jobs
 
-      val tp = PTP.new jobs
-
-      fun doPrio i (D.N (s, deps)) =
+      fun doPrio i (D.N (id, deps)) =
         let
-          val j = A.sub (prios, s)
+          val j = A.sub (prios, id)
         in
             if j < i then
-              ( A.update (prios, s, i)
+              ( A.update (prios, id, i)
               ; if j = ~1 then V.app (doPrio (i + 1)) deps else ()
               )
             else
               ()
         end
 
-      fun cont (Done ((_, p), ns)) =
-            ( M.lock m
-            ; BA.update (dones, p, true)
-            ; M.unlock m
-            ; L.app
-                (fn (p, f) => PTP.submit (tp, (p, fn () => cont (f ns))))
-                (A.sub (conts, p))
-            )
+      fun cont (Done ((_, id), ns)) = (NSA.set (nsa, id, ns); postComp (id, ns))
         | cont (Cont ((prio, _), p, f)) =
             let
-              val i = getId p
+              val id = getId p
             in
-              if BA.sub (dones, i) then
-                (cont o f o V.sub) (nss, i)
-              else
-                if (M.lock m; BA.sub (dones, i)) then
-                  (M.unlock m; (cont o f o V.sub) (nss, i))
-                else
-                  ( A.update (conts, i, (prio, f) :: A.sub (conts, i))
+              case NSA.get (nsa, id) of
+                SOME ns => cont (f ns)
+              | NONE =>
+                  ( M.lock m
+                  ; A.update (conts, id, (prio, f) :: A.sub (conts, id))
                   ; M.unlock m
                   )
             end
 
-      fun comp (D.N (s, revs)) =
-        let
-          val p = A.sub (prios, s)
-        in
-          if p = ~1 then
-            ()
-          else
-            ( A.update (prios, s, ~1)
-            ; PTP.submit
-                (tp, (p, fn () =>
-                  ( (logElab log o V.sub) (paths, s)
-                  ; ( cont
-                    o compileBas log ((SOME o V.sub) (nss, s)) (p, s)
-                    o V.sub
-                    ) (bases, s)
-                  )))
+      and postComp (id, ns) =
+        app
+          (fn (prio, f) => PTP.submit (tp, (prio, fn () => cont (f ns))))
+          (A.sub (conts, id))
+
+     fun elab (prio, id) =
+        ( (logElab log o V.sub) (paths, id)
+        ; (cont o compileBas log (prio, id) o V.sub) (bases, id)
+        )
+
+      (* no lock on prios since it's only accessed from the original thread *)
+      fun comp (D.N (id, revs)) =
+        case A.sub (prios, id) of
+          ~1 => ()
+        | prio =>
+            ( A.update (prios, id, ~1)
+            ; PTP.submit (tp, (prio, fn () => elab (prio, id)))
             ; V.app comp revs
             )
-        end
     in
       doPrio 0 root;
       V.app comp leaves;
       case PTP.wait tp of
-        NONE => V.sub (nss, s)
-      | SOME e => raise e
+        NONE => NSA.sub (nsa, 0)
+      | SOME e => PolyML.Exception.reraise e
     end
 
   fun numJobs j =
@@ -452,10 +477,14 @@ struct
     else
       Int.min (j, Thread.Thread.numProcessors ())
 
-  fun compile { depsFirst, jobs, logger } =
-    (case (numJobs jobs, depsFirst) of
-      (1, true) => serialDeps
-    | (1, _)    => serialEncounter
-    | (n, true) => parDeps n
-    | (n, _)    => parConc n) logger
+  fun compile { depsFirst, jobs, logger } dag =
+    let
+      val jobs = numJobs jobs
+    in
+      (case (jobs, depsFirst) of
+        (1, true) => serialDeps
+      | (1, _)    => serialEncounter
+      | (n, true) => parDeps n
+      | (n, _)    => parConc n) (logger, NSA.new (dag, jobs > 1), dag)
+  end
 end
