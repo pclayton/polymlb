@@ -52,9 +52,6 @@ struct
     , logger    : Log.logger option
     }
 
-  datatype 'a r = Done of 'a * NS.t | Cont of 'a * string * 'a cont
-  withtype 'a cont = NS.t -> 'a r
-
   fun compileSML log (ns, path, opts) =
     let
       val msg = ref ([] : string list)
@@ -134,12 +131,29 @@ struct
       List.exists (fn p' => p' = p) l
     end
 
+  (* compileBas elaborates a given Basis.t (= a list of declarations). It also
+   * takes in a free form argument ('a), typically the basis id in a dag.
+   * When it encounters a Basis import (BasisFile), it returns the path, the
+   * free argument as well as a continuation function which takes in a namespace
+   * and will elaborates the remaining declarations. When it reaches the end,
+   * it returns the complete namespace.
+   * This allows to completely delegate the scheduling and MLB caching to
+   * driver functions, which can process through the dag as needed.
+   *)
+
+  datatype 'a r = Done of 'a * NS.t | Cont of 'a * string * 'a cont
+  withtype 'a cont = NS.t -> 'a r
+
   local
     datatype z = datatype Basis.dec
     datatype z = datatype Basis.exp
   in
     fun compileBas log ns ret ds =
       let
+        (* addendum to the above about compileBas: declaration scopes (e.g
+         * annotations or local/in) are also implemented with continuations,
+         * as well as passing the current namespace as argument.
+         *)
         fun elab (opts, ign) (ns as NS.N (bns, pns), ds, cont) =
           let
             val elab' = elab (opts, ign)
@@ -153,7 +167,8 @@ struct
                 if isIgnored (ign, p) then
                   dec ds
                 else
-                 Cont (ret, p, fn ns' => (NS.import (ns, ns'); dec ds))
+                  Cont (ret, p, fn ns' =>
+                    (NS.import { src = ns', dst = ns }; dec ds))
               | SourceFile p :: ds =>
                   if isIgnored (ign, p) then
                     dec ds
@@ -180,7 +195,7 @@ struct
                           let
                             val { loc, pub } = NS.delegates ns
                           in
-                            NS.import (loc, NS.all);
+                            NS.import { src = NS.all, dst = loc };
                             pub
                           end
                         else
@@ -197,7 +212,7 @@ struct
               | Open b :: ds =>
                   ( case #lookupBas bns b of
                       NONE => raise Compile (UnboundId b)
-                    | SOME ns' => NS.import (ns, ns')
+                    | SOME ns' => NS.import { src = ns', dst = ns }
                   ; dec ds
                   )
               | Structure (new, old) :: ds =>
@@ -226,7 +241,7 @@ struct
                     val ns' = NS.empty ()
                     val { loc, pub } = NS.delegates ns'
                   in
-                    NS.import (loc, ns);
+                    NS.import { src = ns, dst = loc };
                     elab' (pub, ds, fn _ => cont ns')
                   end
              | Id b =>
@@ -238,7 +253,7 @@ struct
                     val ns' = NS.empty ()
                     val { loc, pub } = NS.delegates ns'
                   in
-                    NS.import (loc, ns);
+                    NS.import { src = ns, dst = loc };
                     elab' (loc, ds, fn _ => exp (e, pub, fn _ => cont ns'))
                   end
           in
@@ -253,13 +268,15 @@ struct
     | logElab (SOME { pathFmt, print }) p =
         print (Log.Info, fn () => "elaborating " ^ pathFmt p)
 
-  fun serialDeps log ({ dag = { root as D.N (r, _), ... }, bases, paths, id, ... } : D.t) =
+  (* Driver functions. *)
+
+  fun serialDeps log ({ dag = { root as D.N (r, _), ... }, bases, paths, getId, ... } : D.t) =
     let
       val nss : NS.t option array = A.array (V.length bases, NONE)
 
       fun cont (Done _) = ()
         | cont (Cont (_, p, f)) =
-            case A.sub (nss, id p) of
+            case A.sub (nss, getId p) of
               SOME ns => cont (f ns)
             | NONE => raise Compile (Dependency p)
 
@@ -281,14 +298,14 @@ struct
       (valOf o A.sub) (nss, r)
     end
 
-  fun serialEncounter log ({ dag = { root = D.N (r,  _), ... }, bases, paths, id, ... } : D.t) =
+  fun serialEncounter log ({ dag = { root = D.N (r,  _), ... }, bases, paths, getId, ... } : D.t) =
     let
       val nss : NS.t option array = A.array (V.length bases, NONE)
 
       fun cont (Done (p, ns)) = ns before A.update (nss, p, SOME ns)
         | cont (Cont (_, p, f)) =
             let
-              val i = id p
+              val i = getId p
             in
               case A.sub (nss, i) of
                 SOME ns => cont (f ns)
@@ -305,7 +322,7 @@ struct
       (cont o compileBas log NONE r o V.sub) (bases, r)
     end
 
-  fun parDeps jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, id, ... } : Dag.t) =
+  fun parDeps jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, getId, ... } : Dag.t) =
     let
       val counts = A.tabulate (V.length bases, fn _ => (M.mutex (), ref ~1))
       val nss = A.tabulate (V.length bases, fn _ => NS.empty ())
@@ -322,7 +339,7 @@ struct
             V.app doCounts v
         end
 
-      fun cont (Cont (_, p, f)) = (cont o f o A.sub) (nss, id p)
+      fun cont (Cont (_, p, f)) = (cont o f o A.sub) (nss, getId p)
         | cont _ = ()
 
       fun postDep (n as D.N (s, _)) =
@@ -354,16 +371,16 @@ struct
       | SOME e => raise e
     end
 
-  fun parConc jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, id, ... } : Dag.t) =
+  fun parConc jobs log ({ dag = { root as D.N (s, _), leaves }, bases, paths, getId, ... } : Dag.t) =
     let
-      type c = int * (int * int) cont
+      type c = FixedInt.int * (FixedInt.int * int) cont
 
       val sz    = V.length bases
       val m     = M.mutex ()
       val dones = BA.array (sz, false)
       val conts = A.tabulate (sz, fn _ => ([] : c list))
       val nss   = V.tabulate (sz, fn _ => NS.empty ())
-      val prios = A.array (sz, ~1)
+      val prios = A.array (sz, ~1 : FixedInt.int)
 
       val tp = PTP.new jobs
 
@@ -389,7 +406,7 @@ struct
             )
         | cont (Cont ((prio, _), p, f)) =
             let
-              val i = id p
+              val i = getId p
             in
               if BA.sub (dones, i) then
                 (cont o f o V.sub) (nss, i)

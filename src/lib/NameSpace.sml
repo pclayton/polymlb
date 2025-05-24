@@ -29,8 +29,7 @@ sig
 
   val empty : unit -> t
 
-  (* import the 2nd into the 1st *)
-  val import : t * t -> unit
+  val import : { src : t, dst : t } -> unit
 
   (* Given a base namespace:
    * - reading from loc searches in base if no result
@@ -53,9 +52,14 @@ struct
 
   val pgns = PolyML.globalNameSpace
 
-  fun fns () =
+  type 'a fns =
+      (unit -> (string * 'a) list)
+    * (string * 'a -> unit)
+    * (string -> 'a option)
+
+  fun fns () : 'a fns =
     let
-      val h = H.hash 20
+      val h : 'a H.hash = H.hash 20
     in
       ( fn () => H.fold (fn (s, v, l) => (s, v)::l) [] h
       , fn (s, v) => H.update (h, s, v)
@@ -65,58 +69,38 @@ struct
 
   fun empty () =
     let
-      val (aBas, eBas, lBas) = fns ()
-      val (aFix, eFix, lFix) = fns ()
-      val (aFun, eFun, lFun) = fns ()
-      val (aSig, eSig, lSig) = fns ()
-      val (aStr, eStr, lStr) = fns ()
-      val (aTyp, eTyp, lTyp) = fns ()
-      val (aVal, eVal, lVal) = fns ()
+      val (aBas, eBas, lBas) : t fns                         = fns ()
+      val (aFix, eFix, lFix) : N.Infixes.fixity fns          = fns ()
+      val (aFun, eFun, lFun) : N.Functors.functorVal fns     = fns ()
+      val (aSig, eSig, lSig) : N.Signatures.signatureVal fns = fns ()
+      val (aStr, eStr, lStr) : N.Structures.structureVal fns = fns ()
+      val (aTyp, eTyp, lTyp) : N.TypeConstrs.typeConstr fns  = fns ()
+      val (aVal, eVal, lVal) : N.Values.value fns            = fns ()
     in
       N (
-          { allBas       = aBas
-          , enterBas     = eBas
-          , lookupBas    = lBas
+          { allBas    = aBas, enterBas    = eBas, lookupBas    = lBas
           }
-        , { allFix       = aFix
-          , allFunct     = aFun
-          , allSig       = aSig
-          , allStruct    = aStr
-          , allType      = aTyp
-          , allVal       = aVal
-          , enterFix     = eFix
-          , enterFunct   = eFun
-          , enterSig     = eSig
-          , enterStruct  = eStr
-          , enterType    = eTyp
-          , enterVal     = eVal
-          , lookupFix    = lFix
-          , lookupFunct  = lFun
-          , lookupSig    = lSig
-          , lookupStruct = lStr
-          , lookupType   = lTyp
-          , lookupVal    = lVal
+        , { allFix    = aFix, enterFix    = eFix, lookupFix    = lFix
+          , allFunct  = aFun, enterFunct  = eFun, lookupFunct  = lFun
+          , allSig    = aSig, enterSig    = eSig, lookupSig    = lSig
+          , allStruct = aStr, enterStruct = eStr, lookupStruct = lStr
+          , allType   = aTyp, enterType   = eTyp, lookupType   = lTyp
+          , allVal    = aVal, enterVal    = eVal, lookupVal    = lVal
           }
         )
       end
 
   val global =
     let
-      val (aBas, eBas, lBas) = fns ()
+      val (aBas, eBas, lBas) : t fns = fns ()
     in
-      N (
-          { allBas    = aBas
-          , lookupBas = lBas
-          , enterBas  = eBas
-          }
-        , pgns
-        )
+      N ({ allBas = aBas, lookupBas = lBas, enterBas = eBas }, pgns)
     end
 
   local
-    fun fns l =
+    fun fns l : 'a fns =
       let
-        val h = H.hash (List.length l * 5 div 4)
+        val h : 'a H.hash = H.hash (List.length l * 5 div 4)
         val _ = L.app (fn (k, v) => H.update (h, k, v)) l
       in
         ( fn () => H.fold (fn (s, v, l) => (s, v)::l) [] h
@@ -125,7 +109,7 @@ struct
         )
       end
 
-   fun new (lBas, lFix, lFun, lSig, lStr, lTyp, lVal) =
+    fun new (lBas, lFix, lFun, lSig, lStr, lTyp, lVal) =
       let
         val (aBas, eBas, lBas) = fns lBas
         val (aFix, eFix, lFix) = fns lFix
@@ -135,41 +119,25 @@ struct
         val (aTyp, eTyp, lTyp) = fns lTyp
         val (aVal, eVal, lVal) = fns lVal
       in
-        N (
-            { allBas       = aBas
-            , enterBas     = eBas
-            , lookupBas    = lBas
-            }
-          , { allFix       = aFix
-            , allFunct     = aFun
-            , allSig       = aSig
-            , allStruct    = aStr
-            , allType      = aTyp
-            , allVal       = aVal
-            , enterFix     = eFix
-            , enterFunct   = eFun
-            , enterSig     = eSig
-            , enterStruct  = eStr
-            , enterType    = eTyp
-            , enterVal     = eVal
-            , lookupFix    = lFix
-            , lookupFunct  = lFun
-            , lookupSig    = lSig
-            , lookupStruct = lStr
-            , lookupType   = lTyp
-            , lookupVal    = lVal
-            }
-          )
+         N (
+              { allBas    = aBas, enterBas    = eBas, lookupBas    = lBas
+              }
+            , { allFix    = aFix, enterFix    = eFix, lookupFix    = lFix
+              , allFunct  = aFun, enterFunct  = eFun, lookupFunct  = lFun
+              , allSig    = aSig, enterSig    = eSig, lookupSig    = lSig
+              , allStruct = aStr, enterStruct = eStr, lookupStruct = lStr
+              , allType   = aTyp, enterType   = eTyp, lookupType   = lTyp
+              , allVal    = aVal, enterVal    = eVal, lookupVal    = lVal
+              }
+            )
         end
 
-    val (afix, afun, asig, astr, atyp, aval) =
-      ( #allFix    pgns ()
-      , #allFunct  pgns ()
-      , #allSig    pgns ()
-      , #allStruct pgns ()
-      , #allType   pgns ()
-      , #allVal    pgns ()
-      )
+    local
+      fun get f = f pgns ()
+    in
+      val afix = get #allFix    and afun = get #allFunct and asig = get #allSig
+      and astr = get #allStruct and atyp = get #allType  and aval = get #allVal
+    end
 
     fun mkh l =
       let
@@ -203,14 +171,14 @@ struct
         )
   end
 
-  fun import (N (bs1, ns1), N (bs2, ns2)) =
-    ( L.app (#enterBas bs1)    (#allBas bs2 ())
-    ; L.app (#enterFix ns1)    (#allFix ns2 ())
-    ; L.app (#enterFunct ns1)  (#allFunct ns2 ())
-    ; L.app (#enterSig ns1)    (#allSig ns2 ())
-    ; L.app (#enterStruct ns1) (#allStruct ns2 ())
-    ; L.app (#enterType ns1)   (#allType ns2 ())
-    ; L.app (#enterVal ns1)    (#allVal ns2 ())
+  fun import { src = N (bs1, ns1), dst = N (bs2, ns2) } =
+    ( app (#enterBas    bs2) (#allBas    bs1 ())
+    ; app (#enterFix    ns2) (#allFix    ns1 ())
+    ; app (#enterFunct  ns2) (#allFunct  ns1 ())
+    ; app (#enterSig    ns2) (#allSig    ns1 ())
+    ; app (#enterStruct ns2) (#allStruct ns1 ())
+    ; app (#enterType   ns2) (#allType   ns1 ())
+    ; app (#enterVal    ns2) (#allVal    ns1 ())
     )
 
   local
@@ -218,9 +186,9 @@ struct
     (* todo: delegate { lookup : t, enter : t option } *)
     fun delegate (N (bs, ns), N (bs', ns'), enter) =
       let
-        fun fns (all, enter, lookup) =
+        fun fns (all, enter, lookup) : 'a fns =
           let
-            val h = H.hash 20
+            val h : 'a H.hash = H.hash 20
           in
             ( fn () => H.fold (fn (s, v, l) => (s, v)::l) (all ()) h
             , case enter of
@@ -238,31 +206,17 @@ struct
         val (aTyp, eTyp, lTyp) = fns (#allType ns,   e (#enterType ns'),   #lookupType ns)
         val (aVal, eVal, lVal) = fns (#allVal ns,    e (#enterVal ns'),    #lookupVal ns)
       in
-        N (
-            { allBas       = aBas
-            , enterBas     = eBas
-            , lookupBas    = lBas
-            }
-          , { allFix       = aFix
-            , allFunct     = aFun
-            , allSig       = aSig
-            , allStruct    = aStr
-            , allType      = aTyp
-            , allVal       = aVal
-            , enterFix     = eFix
-            , enterFunct   = eFun
-            , enterSig     = eSig
-            , enterStruct  = eStr
-            , enterType    = eTyp
-            , enterVal     = eVal
-            , lookupFix    = lFix
-            , lookupFunct  = lFun
-            , lookupSig    = lSig
-            , lookupStruct = lStr
-            , lookupType   = lTyp
-            , lookupVal    = lVal
-            }
-          )
+         N (
+              { allBas    = aBas, enterBas    = eBas, lookupBas    = lBas
+              }
+            , { allFix    = aFix, enterFix    = eFix, lookupFix    = lFix
+              , allFunct  = aFun, enterFunct  = eFun, lookupFunct  = lFun
+              , allSig    = aSig, enterSig    = eSig, lookupSig    = lSig
+              , allStruct = aStr, enterStruct = eStr, lookupStruct = lStr
+              , allType   = aTyp, enterType   = eTyp, lookupType   = lTyp
+              , allVal    = aVal, enterVal    = eVal, lookupVal    = lVal
+              }
+            )
       end
   in
     fun delegates ns =

@@ -12,7 +12,7 @@ sig
     , bases : Basis.t vector
     , paths : string vector
       (* raises on invalid path *)
-    , id    : string -> int
+    , getId : string -> int
     }
 
   datatype err = Cycle of string list
@@ -52,7 +52,7 @@ struct
     , full  : dag
     , bases : Basis.t vector
     , paths : string vector
-    , id    : string -> int
+    , getId : string -> int
     }
 
   datatype err = Cycle of string list
@@ -429,7 +429,7 @@ struct
       , full  = full
       , bases = bases
       , paths = paths
-      , id    = fn s => (valOf o H.sub) (ids, s)
+      , getId = fn s => (valOf o H.sub) (ids, s)
       }
     end
 end

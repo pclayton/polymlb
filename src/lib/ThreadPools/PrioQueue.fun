@@ -33,7 +33,7 @@ struct
   structure C = Thread.ConditionVar
   structure M = Thread.Mutex
 
-  type inc  = int * elt
+  type inc  = FixedInt.int * elt
   type outc = elt
 
   (* The tail node is a regular node that has a piority of Int.minInt; this

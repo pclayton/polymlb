@@ -236,18 +236,18 @@ struct
 
   fun import opts src =
     case compile opts src of
-      Ok ns => Ok () before NameSpace.import (NameSpace.global, ns)
+      Ok ns => Ok () before NameSpace.import { src = ns, dst = NameSpace.global }
     | Error e => Error e
 
   local
     fun fmt p = OSP.mkRelative { path = p, relativeTo = (OSF.getDir ()) }
     fun log (Log.Warn, m) = print ("warning: " ^ m () ^ "\n")
-      | log (Log.Error, m) = print ("error" ^ m () ^ "\n")
+      | log (Log.Error, m) = print ("error: " ^ m () ^ "\n")
       | log _ = ()
   in
     fun use s =
       case compile [Logger { pathFmt = fmt, print = log }] s of
-        Ok ns => NameSpace.import (NameSpace.global, ns)
+        Ok ns => NameSpace.import { src = ns, dst = NameSpace.global }
       | Error _ => raise Fail "Static errors"
   end
 end
