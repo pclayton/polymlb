@@ -1,7 +1,3 @@
-OS.FileSys.chDir "..";
-PolyML.make "src/lib/ThreadPools";
-OS.FileSys.chDir "test";
-
 fun for (n, f) =
   let
     fun for' i = if i = n then () else (f i; for' (i + 1))
@@ -18,8 +14,8 @@ fun from (n, f) =
 
 val MAX = 1000
 
-structure Fifo = FifoFn (type elt = int);
-structure Prio = PrioFn (type elt = int);
+structure Fifo = FifoQueue (type elt = int);
+structure Prio = PrioQueue (type elt = int);
 
 let
   val q = Fifo.new ()

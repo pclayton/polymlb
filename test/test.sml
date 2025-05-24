@@ -1,5 +1,7 @@
 (* use / make don't like absolute or ../ relative paths *)
 OS.FileSys.chDir "..";
+PolyML.suffixes := ".fun" :: !PolyML.suffixes;
+PolyML.make "src/lib/ThreadPools";
 use "src/lib/build.sml";
 OS.FileSys.chDir "test";
 

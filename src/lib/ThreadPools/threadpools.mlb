@@ -1,6 +1,10 @@
 local
   $(SML_LIB)/basis/basis.mlb
   $(SML_LIB)/basis/poly.mlb
+  QUEUE.sig
+  FifoQueue.fun
+  PrioQueue.fun
+  ThreadPool.fun
 in
   ml_bind.sml
 end
