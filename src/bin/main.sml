@@ -19,7 +19,6 @@ type opts =
   , out      : string
   , pathMap  : string H.hash
   , polyc    : string
-  , pSuccess : bool
   , quiet    : bool
   , rootAnns : P.Ann.t list
   , verbose  : int
@@ -72,7 +71,6 @@ local
 , "   -main <name>                   Root function to export"
 , "-o -output <file>                 Name of output file"
 , "   -polyc <polyc>                 Polyc executable instead of 'polyc'"
-, "   -print-out                     Print out file name to stdout if success"
 , "-q -quiet                         Silence warnings"
 , "   -sml-lib                       Print the resolved value of $(SML_LIB)"
 , "-v -verbose <n>                   Set verbosity level"
@@ -109,7 +107,6 @@ local
     , out      = ref ""
     , pathMap  = ref (H.hash 10 : string H.hash)
     , polyc    = ref "polyc"
-    , pSuccess = ref false
     , quiet    = ref false
     , rootAnns = ref ([] : P.Ann.t list)
     , verbose  = ref 0
@@ -205,7 +202,6 @@ in
               | "-o" => l := set (xs, "-o", #out, SOME)
               | "-output" => l := set (xs, "-output", #out, SOME)
               | "-polyc" => l := set (xs, "-p", #polyc, SOME)
-              | "-print-out" => #pSuccess d := true
               | "-q" => #quiet d := true
               | "-quiet" => #quiet d := true
               | "-sml-lib" => #cmd d := SmlLib
@@ -245,7 +241,6 @@ in
         , out      = out
         , pathMap  = !(#pathMap d)
         , polyc    = !(#polyc d)
-        , pSuccess = !(#pSuccess d)
         , quiet    = !(#quiet d)
         , rootAnns = !(#rootAnns d)
         , verbose  = !(#verbose d)
@@ -427,14 +422,10 @@ fun printSmlLib ({ pathMap, ... } : opts) =
 
 fun main () =
   let
-    val opts as { cmd, out, pSuccess, ... } = parseArgs ()
+    val opts as { cmd, ... } = parseArgs ()
   in
     (case cmd of
       CompileLink => compileLink
     | Compile => compile
-    | SmlLib => printSmlLib) opts;
-    if pSuccess then
-      print (out ^ "\n")
-    else
-      ()
+    | SmlLib => printSmlLib) opts
   end
