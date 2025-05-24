@@ -1,9 +1,23 @@
-(* use / make don't like absolute or ../ relative paths *)
-OS.FileSys.chDir "..";
-PolyML.suffixes := ".fun" :: !PolyML.suffixes;
-PolyML.make "src/lib/ThreadPools";
-use "src/lib/build.sml";
-OS.FileSys.chDir "test";
+let
+  (* PolyML.make directly calls the top level print for its 'Making ...' and
+   * 'Created ...' messages, so we manually redirect it to /dev/null. Simply
+   * closing TextIO.stdOut or its underlying StreamIO stream causes unhandled
+   * exceptions when print is called.
+   *)
+  open TextIO
+  val stdout = getOutstream stdOut
+  val devnull = openOut "/dev/null"
+in
+  (* use / make don't like absolute or ../ relative paths *)
+  OS.FileSys.chDir "..";
+  PolyML.suffixes := ".fun" :: !PolyML.suffixes;
+  setOutstream (stdOut, getOutstream devnull);
+  PolyML.make "src/lib/ThreadPools";
+  use "src/lib/build.sml";
+  closeOut devnull;
+  setOutstream (stdOut, stdout);
+  OS.FileSys.chDir "test"
+end;
 
 structure Test :>
 sig
@@ -23,7 +37,7 @@ struct
 
   fun fail s =
     ( TextIO.output (TextIO.stdErr, "Failed: " ^ s ^ "\n")
-    ; raise Fail s
+    ; OS.Process.exit OS.Process.failure
     )
 
   fun eq ((s, a), e) = if a = e then () else fail s

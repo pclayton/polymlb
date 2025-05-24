@@ -9,7 +9,7 @@ all: sml
 sml: $(SML)
 
 $(SML):
-	@ echo 'use "test.sml"; use "$@";' | poly --error-exit > /dev/null
+	@ echo 'PolyML.print_depth ~1; use "test.sml"; use "$@";' | poly -q --error-exit
 
 repos: $(REPOS)
 
