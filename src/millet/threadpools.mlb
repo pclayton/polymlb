@@ -1,0 +1,10 @@
+local
+  basis.mlb
+  poly.mlb
+  $(ROOT)/ThreadPools/QUEUE.sig
+  $(ROOT)/ThreadPools/FifoQueue.fun
+  $(ROOT)/ThreadPools/PrioQueue.fun
+  $(ROOT)/ThreadPools/ThreadPool.fun
+in
+  $(ROOT)/ThreadPools/ml_bind.sml
+end

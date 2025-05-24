@@ -1,0 +1,16 @@
+local
+  basis.mlb
+  poly.mlb
+  threadpools.mlb
+  $(ROOT)/Log.sml
+  $(ROOT)/Lex.sml
+  $(ROOT)/Parse.sml
+  $(ROOT)/Ann.sml
+  $(ROOT)/Path.sml
+  $(ROOT)/Basis.sml
+  $(ROOT)/Dag.sml
+  $(ROOT)/NameSpace.sml
+  $(ROOT)/Compile.sml
+in
+  $(ROOT)/PolyMLB.sml
+end

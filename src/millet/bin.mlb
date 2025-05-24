@@ -1,7 +1,10 @@
 local
   $(SML_LIB)/basis/basis.mlb
-  lib.mlb
+  poly.mlb
+  polymlb.mlb
+  $(ROOT)/build.sml
 in
   ../bin/version.sml
   ../bin/main.sml
+  ../bin/build.sml
 end

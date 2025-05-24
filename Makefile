@@ -30,10 +30,18 @@ install: all sml_lib
 	cp -RL lib/*                $(DESTDIR)$(SML_LIB)
 	$(INSTALL) -m 644 polymlb.1 $(DESTDIR)$(MANDIR)/man1
 
+$(MLB):
+	sed \
+		-e '/mlb$$/s:^\([[:space:]]*\).*/:\1:g' \
+		-e '/\(sml\|sig\|fun\)$$/s:^\([[:space:]]*\):\1$$(ROOT)$(@D:src/lib%=%)/:g' \
+		< $@ > src/millet/$(@F)
+
+millet-stubs: $(MLB)
+
 clean:
 	rm -f polymlb
 
 test-clean:
 	$(MAKE) -C test clean
 
-.PHONY: all clean install sml_lib test
+.PHONY: $(MLB) all clean install millet-stubs sml_lib test

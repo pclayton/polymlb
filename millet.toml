@@ -1,5 +1,8 @@
 version = 1
 [workspace]
-root = "src/millet/*.mlb"
+root = "src/millet/bin.mlb"
+[workspace.path-vars]
+ROOT = { path = "src/lib" }
 [diagnostics]
+5038.severity = "ignore"
 5043.severity = "ignore"

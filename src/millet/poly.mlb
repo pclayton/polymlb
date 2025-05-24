@@ -1,0 +1,9 @@
+local
+  $(SML_LIB)/basis/basis.mlb
+in
+  ann
+    "milletDiagnosticsIgnore true"
+  in
+    stub.sml
+  end
+end
