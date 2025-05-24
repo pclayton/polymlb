@@ -1,8 +1,8 @@
 local
   $(SML_LIB)/basis/basis.mlb
   $(SML_LIB)/basis/poly.mlb
+  ThreadPools/threadpools.mlb
   Log.sml
-  ThreadPool.sml
   Lex.sml
   Parse.sml
   Ann.sml

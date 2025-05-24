@@ -7,8 +7,8 @@ in
     stub.sml
   end
   local
+    ../lib/ThreadPools/threadpools.mlb
     ../lib/Log.sml
-    ../lib/ThreadPool.sml
     ../lib/Lex.sml
     ../lib/Parse.sml
     ../lib/Ann.sml

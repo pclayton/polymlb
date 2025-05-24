@@ -26,14 +26,14 @@ struct
   structure A    = Array
   structure BA   = BoolArray
   structure D    = Dag
-  structure FTP  = ThreadPool.FTP
+  structure FTP  = ThreadPools.FTP
   structure H    = HashArray
   structure L    = List
   structure M    = Thread.Mutex
   structure NS   = NameSpace
   structure P    = PolyML
   structure PC   = PolyML.Compiler
-  structure PTP  = ThreadPool.PTP
+  structure PTP  = ThreadPools.PTP
   structure TIO  = TextIO
   structure TSIO = TIO.StreamIO
   structure V    = Vector

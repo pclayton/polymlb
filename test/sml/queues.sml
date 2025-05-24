@@ -1,5 +1,5 @@
 OS.FileSys.chDir "..";
-use "src/lib/ThreadPool.sml";
+PolyML.make "src/lib/ThreadPools";
 OS.FileSys.chDir "test";
 
 fun for (n, f) =

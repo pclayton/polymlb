@@ -8,7 +8,8 @@ SML_LIB   ?= $(LIBDIR)/polymlb
 POLYC     ?= polyc
 INSTALL   ?= install
 
-SRC != ls src/bin/*.sml src/lib/*.sml
+SRC != find src/bin src/lib -name '*.sml' -o -name '*.sig' -o -name '*.fun'
+MLB != find src/lib -name '*.mlb'
 
 all: polymlb
 

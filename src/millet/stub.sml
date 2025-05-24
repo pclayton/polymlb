@@ -30,6 +30,16 @@ sig
     , startPosition : int, endPosition : int
     }
 
+  structure Exception :
+  sig
+    val exceptionLocation : exn -> location option
+    val raiseWithLocation : exn * location -> 'a
+    val reraise : exn -> 'a
+
+    val traceException : (unit -> 'a) * (string list * exn -> 'a) -> 'a
+    val exception_trace : (unit -> 'a) -> 'a
+  end
+
   datatype context =
     ContextLocation of location
   | ContextProperty of string * string
@@ -262,6 +272,9 @@ sig
     (unit -> char option) * Compiler.compilerParameters list
     -> unit -> unit
 
+  val make : string -> unit
+  val getUseFileName : unit -> string option
+  val suffixes : string list ref
   val export : string * (unit -> unit) -> unit
 end =
 struct

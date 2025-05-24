@@ -577,7 +577,7 @@ struct
     end
 end
 
-structure ThreadPool =
+structure ThreadPools =
 let
   structure Fifo = FifoFn (type elt = unit -> unit)
   structure Prio = PrioFn (type elt = unit -> unit)
