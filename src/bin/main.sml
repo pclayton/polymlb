@@ -19,7 +19,6 @@ type opts =
   , out      : string
   , pathMap  : string H.hash
   , polyc    : string
-  , quiet    : bool
   , rootAnns : P.Ann.t list
   , verbose  : int
   }
@@ -70,7 +69,8 @@ local
 , "   -main <name>                   Root function to export"
 , "-o -output <file>                 Name of output file"
 , "   -polyc <polyc>                 Polyc executable instead of 'polyc'"
-, "-q -quiet                         Silence warnings"
+, "-q -quiet                         Equivalent to -verbose 1"
+, "-Q -reallyquiet                   Equivalent to -verbose 0"
 , "   -sml-lib                       Print the resolved value of $(SML_LIB)"
 , "-v -verbose <n>                   Set verbosity level"
 , "-V -version                       Print PolyMLB version"
@@ -106,9 +106,8 @@ local
     , out      = ref ""
     , pathMap  = ref (H.hash 10 : string H.hash)
     , polyc    = ref "polyc"
-    , quiet    = ref false
     , rootAnns = ref ([] : P.Ann.t list)
-    , verbose  = ref 0
+    , verbose  = ref 2
     }
 
   fun req s = [] before die ("missing required argument for option " ^ s)
@@ -201,11 +200,13 @@ in
               | "-o" => l := set (xs, "-o", #out, SOME)
               | "-output" => l := set (xs, "-output", #out, SOME)
               | "-polyc" => l := set (xs, "-p", #polyc, SOME)
-              | "-q" => #quiet d := true
-              | "-quiet" => #quiet d := true
+              | "-q" => #verbose d := 1
+              | "-quiet" => #verbose d := 1
+              | "-Q" => #verbose d := 0
+              | "-reallyquiet" => #verbose d := 0
               | "-sml-lib" => #cmd d := SmlLib
               | "-v" => l := set (xs, "-v", #verbose, posInt)
-              | "-verbose" => l := set (xs, "-v", #verbose, posInt)
+              | "-verbose" => l := set (xs, "-verbose", #verbose, posInt)
               | "-V" => version ()
               | "-version" => version ()
               | s =>
@@ -240,7 +241,6 @@ in
         , out      = out
         , pathMap  = !(#pathMap d)
         , polyc    = !(#polyc d)
-        , quiet    = !(#quiet d)
         , rootAnns = !(#rootAnns d)
         , verbose  = !(#verbose d)
         }
@@ -294,12 +294,8 @@ end
 
 local
   structure P = PolyMLB
-  datatype z = datatype P.Log.level
 
-  fun log v (Trace, m) = if v > 2 then println (m ()) else ()
-    | log v (Debug, m) = if v > 1 then println (m ()) else ()
-    | log v (Info,  m) = if v > 0 then println (m ()) else ()
-    | log _ (_, m) = println (m ())
+  fun log v (l, m) = if v >= P.Log.levelToInt l then println (m ()) else ()
 
   fun fmt p =
     let
@@ -311,7 +307,7 @@ local
         p
     end
 
-  fun o2o ({ defAnns, depsf, disAnns, jobs, pathMap, quiet, rootAnns, verbose, ... } : opts) =
+  fun o2o ({ defAnns, depsf, disAnns, jobs, pathMap, rootAnns, verbose, ... } : opts) =
     let
       val l =
         [ P.PathMap pathMap
@@ -319,7 +315,7 @@ local
         , P.DisabledAnns disAnns
         ]
       val l =
-        if quiet then
+        if verbose = 0 then
           l
         else
           P.Logger { pathFmt = fmt, print = log verbose } :: l

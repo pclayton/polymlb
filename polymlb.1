@@ -89,7 +89,13 @@ Link using
 .Ar polyc
 instead of "polyc".
 .It Fl q, Fl quiet
-Silence warnings.
+Silence warnings. This is equivalent to
+.Fl verbose
+1.
+.It Fl Q, Fl reallyquiet
+Silence errors. This is equivalent to
+.Fl verbose
+0.
 .It Fl sml-lib
 Print the resolved value of
 .Pa SML_LIB
@@ -103,8 +109,8 @@ it will be printed on stderr.
 .It Fl v, Fl verbose Ar n
 Set the verbosity level for logging.
 .Ar n
-must be a positive integer, with 0 meaning that only warnings and errors are
-logged.
+must be either a positive integer or 0, which silences all logging. Default
+is 2 (log only errors and warnings).
 .It Fl V, Fl version
 Print PolyMLB and Poly/ML version and exit.
 .Sh ML BASIS
