@@ -25,7 +25,6 @@ type opts =
   }
 
 local
-  fun name () = CommandLine.name () ^ ": "
   fun f str s =
     if S.isSuffix "\n" s then
       TIO.output (str, s)
