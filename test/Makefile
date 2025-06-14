@@ -10,6 +10,7 @@ sml: $(SML)
 
 $(SML):
 	@ echo 'PolyML.print_depth ~1; use "test.sml"; use "$@";' | poly -q --error-exit
+	@ echo $@: OK
 
 repos: $(REPOS)
 
@@ -22,7 +23,7 @@ $(REPOS):
 		smlpkg sync && \
 		git apply ../../$(@F:.t=.patch); \
 	} > /dev/null
-	$(MAKE) -sj1 -C $(REPOS_DIR)/$(@F:.t=) MLCOMP=$(POLYMLB) clean all
+	$(MAKE) -sj1 -C $(REPOS_DIR)/$(@F:.t=) MLCOMP="$(POLYMLB) -q" clean all
 
 clean:
 	rm -rf $(REPOS_DIR)
