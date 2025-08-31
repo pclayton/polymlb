@@ -175,6 +175,8 @@ struct
 
   fun doBasis f opts src =
     let
+      val srcFull = OSF.fullPath src
+
       val opts as { conc, logger, ... } = doOpts opts
       val copts =
         { depsFirst = #depsFirst conc, jobs = #jobs conc, logger = logger }
@@ -198,7 +200,7 @@ struct
 
       fun mkBas p =
         ( (fn b =>
-            if p = src then
+            if p = srcFull then
               #preproc opts { bas = b, path = p, root = true }
             else
               #preproc opts { bas = b, path = p, root = false })
@@ -211,8 +213,7 @@ struct
       ( Ok
       o f copts
       o Dag.process { logger = logger, reduce = true } mkBas
-      o OSF.fullPath
-      ) src
+      ) srcFull
       handle x =>
         let
           val err =
