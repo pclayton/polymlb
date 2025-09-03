@@ -95,11 +95,17 @@ struct
 
   fun doBasis f opts src =
     let
-      val srcFull = OSF.fullPath src
-
       val opts as { conc, logger, ... } = doOpts opts
       val copts =
         { depsFirst = #depsFirst conc, jobs = #jobs conc, logger = logger }
+
+      val src = OSF.fullPath src
+        handle e =>
+          ( case logger of
+              SOME { print, ... } => print (Log.Error, fn () => exnMessage e)
+            | _ => ()
+          ; PolyML.Exception.reraise e
+          )
 
       val pathMap =
         let
@@ -120,7 +126,7 @@ struct
 
       fun mkBas p =
         ( (fn b =>
-            if p = srcFull then
+            if p = src then
               #preproc opts { bas = b, path = p, root = true }
             else
               #preproc opts { bas = b, path = p, root = false })
@@ -132,10 +138,10 @@ struct
     in
       ( f copts
       o Dag.process { logger = logger, reduce = true } mkBas
-      ) srcFull
+      ) src
       handle e =>
-        ( Option.app
-            (fn { pathFmt, print } =>
+        ( case logger of
+            SOME { pathFmt, print } =>
               print (Log.Error,
                 fn () => case e of
                     Lex.Lex z          => Lex.errToString pathFmt z
@@ -143,8 +149,8 @@ struct
                   | Basis.Validation z => Basis.errToString pathFmt z
                   | Dag.Dag z          => Dag.errToString pathFmt z
                   | Compile.Compile z  => Compile.errToString pathFmt z
-                  | _                  => exnMessage e))
-            logger
+                  | _                  => exnMessage e)
+          | _ => ()
         ; PolyML.Exception.reraise e
         )
     end
