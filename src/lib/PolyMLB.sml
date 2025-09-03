@@ -12,31 +12,27 @@ sig
 
   type opts = opt list
 
-  datatype err =
-    Lex of Lex.err
-  | Parse of Parse.err
-  | Validation of Basis.err
-  | Dag of Dag.err
-  | Compilation of Compile.err
-  | Exn of exn
-
-  datatype 'a result =
-    Ok of 'a
-  | Error of err
-
   (* Default path map *)
   val pathMap : string HashArray.hash
 
-  val compile : opts -> string -> NameSpace.t result
+  (* Compile the given basis and return the resulting namespace.
+   * May raise one of the following:
+   * - Lex.Lex;
+   * - Parse.Parse;
+   * - Basis.Validation;
+   * - Dag.Dag;
+   * - Compile.Compile;
+   * - IO.Io.
+   *)
+  val compile : opts -> string -> NameSpace.t
 
-  (* Compile and import the content of the basis in the global namespace. *)
-  val import : opts -> string -> unit result
+  (* Compile and import the content of the basis in the global namespace.
+   * See `compile` for errors.
+   *)
+  val import : opts -> string -> unit
 
   (* Compile and import an mlb file, much like the top level `use`. *)
   val use : string -> unit
-
-  (* path fmt *)
-  val errToString  : (string -> string) -> err -> string
 end =
 struct
   structure H   = HashArray
@@ -53,18 +49,6 @@ struct
 
   type opts = opt list
 
-  datatype err =
-    Lex of Lex.err
-  | Parse of Parse.err
-  | Validation of Basis.err
-  | Dag of Dag.err
-  | Compilation of Compile.err
-  | Exn of exn (* likely SysErr or IO.Io *)
-
-  datatype 'a result =
-    Ok of 'a
-  | Error of err
-
   (* http://mlton.org/MLBasisPathMap
    * https://github.com/MLton/mlton/blob/master/mlton/control/control-flags.sml#L1636
    * - int, word and real can be deduced from precision / wordSize / radix
@@ -75,70 +59,6 @@ struct
    *   val getOS: int = getOSCall() -> 0 for Posix, 1 -> Windows
    *)
   val pathMap : string H.hash = H.hash 10
-
-  local
-    val cat = String.concat
-  in
-    fun errToString fmt =
-      let
-        val loc2s = Log.locFmt fmt
-      in
-        fn Lex (e, at) =>
-            cat
-            [ loc2s at, ": error: invalid token:\n"
-            , case e of
-                Lex.BadChar c => "bad character '" ^ Char.toString c ^ "'"
-              | Lex.BadWord w => "reserved word not allowed here '" ^ w ^ "'"
-              | Lex.UnclosedComment => "unclosed comment"
-              | Lex.UnclosedString => "unclosed string"
-            ]
-        | Parse l =>
-            let
-              val toString = Parse.Element.toString
-              fun str nil = ""
-                | str [e] = toString e
-                | str  e  = "one of " ^ String.concatWith ", " (map toString e)
-              fun f ([], r) = r
-                | f ([{ expected, found, at }], r) =
-                    [ loc2s at, ": error: invalid grammar\nexpected "
-                    , str expected , " but found ", toString found, "\n"
-                    ] @ r
-                | f ({ expected = e, at, ... }::xs, r) =
-                    f (xs, ["parsing ", str e, " at ", loc2s at, "\n"] @ r)
-            in
-              (cat o f) (l, [])
-            end
-        | Validation (kind, s, at) =>
-            cat
-              [ loc2s at, ": error: invalid declaration\n"
-              , case kind of
-                  Basis.DuplicateBind   => "rebound identifier"
-                | Basis.Extension       => "invalid file extension"
-                | Basis.UnboundVariable => "unbound path var"
-              , ": '", s, "'"
-              ]
-        | Dag (Dag.Cycle l) =>
-            cat
-              (  "error: mlb cycle:\n"
-              :: List.concat (List.map (fn s => ["\t", s, "\n"]) l)
-              )
-        | Compilation k =>
-            cat
-              [ case k of
-                  Compile.Compilation (_, at) => loc2s at ^ ": "
-                | Compile.Execution (f, _) => fmt f ^ ": "
-                | _ => ""
-              , "error: aborted compilation:\n"
-              , case k of
-                  Compile.Compilation (s, _) => s
-                | Compile.Dependency s => "Dependency invariant violated: " ^ s
-                | Compile.Execution (_, e) =>
-                    "raised during execution: " ^ exnMessage e
-                | Compile.UnboundId s => "unbound id: " ^ s
-              ]
-        | Exn e => "error: " ^ exnMessage e
-      end
-  end
 
   fun readFile p =
     let
@@ -210,35 +130,29 @@ struct
         o readFile
         ) p
     in
-      ( Ok
-      o f copts
+      ( f copts
       o Dag.process { logger = logger, reduce = true } mkBas
       ) srcFull
-      handle x =>
-        let
-          val err =
-            case x of
-              Lex.Lex z          => Lex z
-            | Parse.Parse z      => Parse z
-            | Basis.Validation z => Validation z
-            | Dag.Dag z          => Dag z
-            | Compile.Compile z  => Compilation z
-            | z                  => Exn z
-        in
-          Option.app
+      handle e =>
+        ( Option.app
             (fn { pathFmt, print } =>
-              print (Log.Error, fn () => errToString pathFmt err))
-            logger;
-          Error err
-        end
+              print (Log.Error,
+                fn () => case e of
+                    Lex.Lex z          => Lex.errToString pathFmt z
+                  | Parse.Parse z      => Parse.errToString pathFmt z
+                  | Basis.Validation z => Basis.errToString pathFmt z
+                  | Dag.Dag z          => Dag.errToString pathFmt z
+                  | Compile.Compile z  => Compile.errToString pathFmt z
+                  | _                  => exnMessage e))
+            logger
+        ; PolyML.Exception.reraise e
+        )
     end
 
   fun compile opts = doBasis Compile.compile opts
 
   fun import opts src =
-    case compile opts src of
-      Ok ns => Ok () before NameSpace.import { src = ns, dst = NameSpace.global }
-    | Error e => Error e
+    NameSpace.import { src = compile opts src, dst = NameSpace.global }
 
   local
     fun fmt p = OSP.mkRelative { path = p, relativeTo = (OSF.getDir ()) }
@@ -247,9 +161,11 @@ struct
       | log _ = ()
   in
     fun use s =
-      case compile [Logger { pathFmt = fmt, print = log }] s of
-        Ok ns => NameSpace.import { src = ns, dst = NameSpace.global }
-      | Error _ => raise Fail "Static errors"
+      NameSpace.import
+        { src = compile [Logger { pathFmt = fmt, print = log }] s
+        , dst = NameSpace.global
+        }
+      handle _ => raise Fail "Static errors"
   end
 end
 

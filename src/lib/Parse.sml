@@ -42,6 +42,8 @@ sig
 
   exception Parse of err
 
+  val errToString : (string -> string) -> err -> string
+
   val parse : string -> Lex.t -> t
 end =
 struct
@@ -89,8 +91,12 @@ struct
       | Bas       => "bas expression"
       | Id        => "identifier"
       | Let       => "let/in expression"
-      | Token t   => "token " ^ L.toString t
       | EOF       => "EOF"
+      | Token t   =>
+          case t of
+            L.String _ => L.toString t
+          | L.Symbol _ => L.toString t
+          | _ => "'" ^ L.toString t ^ "'"
   end
 
   structure E = Element
@@ -104,6 +110,23 @@ struct
     } list
 
   exception Parse of err
+
+  fun errToString fmt l =
+    let
+      fun str nil = ""
+        | str [e] = E.toString e
+        | str [e1, e2] = E.toString e1 ^ " or " ^ E.toString e2
+        | str  e  = "one of " ^ String.concatWith ", " (map E.toString e)
+      fun f ([], r) = r
+        | f ([{ expected, found, at }], r) =
+            [ Log.locFmt fmt at, ": error: expected "
+            , str expected , " but found ", E.toString found, "\n"
+            ] @ r
+        | f ({ expected = e, at, ... }::xs, r) =
+            f (xs, ["  parsing ", str e, " at ", Log.locFmt fmt at, "\n"] @ r)
+    in
+      (concat o f) (l, [])
+    end
 
   local
     val isIdChar =

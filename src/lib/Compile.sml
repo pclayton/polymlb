@@ -8,6 +8,8 @@ sig
 
   exception Compile of err
 
+  val errToString : (string -> string) -> err -> string
+
   type opts =
     { depsFirst : bool
     , jobs      : int
@@ -45,6 +47,20 @@ struct
   | UnboundId   of string
 
   exception Compile of err
+
+  fun errToString fmt k =
+    concat
+      [ case k of
+          Compilation (_, at) => Log.locFmt fmt at ^ ": "
+        | Execution (f, _) => fmt f ^ ": "
+        | _ => ""
+      , "error: "
+      , case k of
+          Compilation (s, _) => s
+        | Dependency s => "dependency invariant violated: " ^ s
+        | Execution (_, e) => "raised during execution: " ^ exnMessage e
+        | UnboundId s => "unbound id: " ^ s
+      ]
 
   type opts =
     { depsFirst : bool

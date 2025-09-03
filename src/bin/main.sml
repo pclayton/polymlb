@@ -336,10 +336,8 @@ local
 
   fun err _ = ()
 in
-  fun doCompile (opts as { file, ... } : opts) : P.NameSpace.t =
-    case P.compile (o2o opts) file of
-      P.Ok ns => ns
-    | P.Error _ => (die ""; raise Fail "")
+  fun doCompile (opts as { file, ... } : opts) =
+    P.compile (o2o opts) file handle _ => (die ""; raise Fail "")
 end
 
 local

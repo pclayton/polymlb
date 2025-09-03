@@ -12,9 +12,9 @@ following functions:
   function `use`.
 
 The behavior of both `compile` and `import` can be customized through the passed
-in options and return an `Ok | Error` value. On the other hand, `use` does not
-take in options and has type `string -> unit`; in case of error, it prints the
-error to stdout and raises an exception.
+in options and raises on error. On the other hand, `use` does not take in has
+type `string -> unit`; in case of error, it prints the error to stdout and
+raises Fail.
 
 The library can be imported by calling `use` with the `build.sml` file in
 `src/lib`, though SML_LIB is not set by default. Once it has been successfully

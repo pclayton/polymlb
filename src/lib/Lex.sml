@@ -39,6 +39,8 @@ sig
 
   exception Lex of err
 
+  val errToString : (string -> string) -> err -> string
+
   (* raises Lex in case of
    * - unclosed comment
    * - unclosed string
@@ -73,9 +75,7 @@ struct
 
   fun toString t =
     case t of
-      String "" => "string"
-    | String s => "string \"" ^ s ^ "\""
-    | Symbol "" => "symbol"
+      String s => "string \"" ^ s ^ "\""
     | Symbol s => "symbol \"" ^ s ^ "\""
     | And => "and"
     | Ann => "ann"
@@ -163,6 +163,17 @@ struct
   type err = err_kind * PolyML.location
 
   exception Lex of err
+
+  fun errToString fmt (e, at) =
+    concat
+      [ Log.locFmt fmt at
+      , ": error: invalid token: "
+      , case e of
+          BadChar c => "bad character '" ^ Char.toString c ^ "'"
+        | BadWord w => "reserved word not allowed here '" ^ w ^ "'"
+        | UnclosedComment => "unclosed comment"
+        | UnclosedString => "unclosed string"
+      ]
 
   type t = (token * position) list * { start : position, eof : position }
 

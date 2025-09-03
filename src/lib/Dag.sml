@@ -19,6 +19,8 @@ sig
 
   exception Dag of err
 
+  val errToString : (string -> string) -> err -> string
+
   type opts =
     { logger : Log.logger option
     , reduce : bool
@@ -58,6 +60,10 @@ struct
   datatype err = Cycle of string list
 
   exception Dag of err
+
+  fun errToString fmt (Cycle l) =
+    concat
+      ("error: mlb cycle:\n" :: List.concat (map (fn s => ["  ", s, "\n"]) l))
 
   type opts =
     { logger : Log.logger option

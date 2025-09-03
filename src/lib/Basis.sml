@@ -45,6 +45,8 @@ sig
 
   exception Validation of err
 
+  val errToString : (string -> string) -> err -> string
+
   (* Validate parse results and convert to their Basis counterpart.
    * Will propagate exceptions that were raised during validation.
    * The following operations are performed:
@@ -97,6 +99,16 @@ struct
   type err = err_kind * string * PolyML.location
 
   exception Validation of err
+
+  fun errToString fmt (kind, s, at) =
+    concat
+      [ Log.locFmt fmt at, ": error: "
+      , case kind of
+          DuplicateBind   => "rebound identifier"
+        | Extension       => "invalid file extension"
+        | UnboundVariable => "unbound path var"
+      , ": '", s, "'"
+      ]
 
   datatype FileType = MLB | SML
 
