@@ -1,14 +1,12 @@
 (* Skiplist priority queue from "Skiplist-based concurrent priority queues",
  * Itay Lotan and Nir Shavit.
  *
- * The usual level distribution of 1/2 is used, with a maximum level of 12;
- * this means that a single queue instance is suitable for upto 2^12 nodes
- * (4096). If needed, this arbitrary limit may be raised up to 31 simply by
- * modifying the MAX value; larger values would require changing the underlying
- * node type.
+ * The usual level distribution of 1/2 is used, with a maximum level of 8.
+ * If needed, this arbitrary limit may be raised simply by modifying the
+ * maxLevel value.
  * This implementation allows for elements with the same priority to be stored
- * within the same node upto a certain capacity (2^32) unless the existing node
- * is logically deleted at the time of insertion. If a new element cannot be
+ * within the same node upto a certain capacity unless the existing node is
+ * logically deleted at the time of insertion. If a new element cannot be
  * added to any existing node with the corresponding priority, a new node is
  * inserted _after_ all other nodes with the same priority. A node is considered
  * to be logically deleted when its element count reaches zero.
@@ -16,11 +14,16 @@
  * node is found, then its count is decreased by 1 and the element is retrieved.
  * If the updated count is zero, then the node is physically deleted from the
  * list.
- * Locking as well as capacity checks are implemented with a 63 bit bitset:
- * - the high 31 bits contain the capacity;
- * - the low MAX bits are used to lock forward pointers
- *   (level n is considered to be locked if 1 << n is set)
- * - the MAX + 1 bit is the insertion/deletion bit (full node lock).
+ * Locking as well as capacity checks are implemented with a bitset of size
+ * usedBits:
+ * - the low maxLevel bits are used to lock forward pointers
+ *   (level n is considered to be locked if 1 << n is set);
+ * - the next bit (maxLevel + 1) is the fullLock bit for insertion and deletion;
+ * - the remaining high bits contain the capacity.
+ * The capacity is always stored in the high bits, regardless of the word size.
+ * E.g with usedBits = 31, maxLevel = 8 and a word size of 63, there is a 32 bit
+ * gap in the middle of the bitset:
+ * [22 bit capacity | 32 bit empty | 1 bit fullLock | 8 bit level locks] = 63.
  *
  * see:
  *   https://people.csail.mit.edu/shanir/publications/Priority_Queues.pdf
@@ -51,9 +54,6 @@ struct
       , w : Word.word ref
       }
 
-  val MAX = 12
-  val INS = MAX + 1
-
   val `& = Word.andb
   val `| = Word.orb
   val `^ = Word.xorb
@@ -64,14 +64,17 @@ struct
 
   infix 8 `& `| `^ << >>
 
-  val LIM = (0w1 << 0w31) - 0w1
+  val usedBits = 31
+  val maxLevel = 8
+  val fullLock = maxLevel + 1
+  val maxItems = 0w1 << Word.fromInt (usedBits - fullLock) - 0w1
 
-  (* Threadsafe biased RNG, 1/2 distribution from 1 to MAX.
+  (* Threadsafe biased RNG, 1/2 distribution from 1 to maxLevel.
    *
    * The generator used is xoroshiro128++, initially seeded with splitmix64;
    * generator state is thread local. Rather than the `while (rng () < 0.5) i++`
-   * in Pugh's paper, we generate 63 bits once and keep only the low MAX bits,
-   * discarding the rest.
+   * in Pugh's paper, we generate 63 bits once and keep only the low maxLevel
+   * bits, discarding the rest.
    *
    * see:
    *   https://prng.di.unimi.it/
@@ -127,7 +130,7 @@ struct
         (ref (sm64 s), ref (sm64 s))
       end
 
-    val mask = (0w1 << Word.fromInt MAX) - 0w1
+    val mask = (0w1 << Word.fromInt maxLevel) - 0w1
   in
     fun rand () =
       let
@@ -147,7 +150,7 @@ struct
           , m = M.mutex (), c = C.conditionVar (), w = ref 0w0
           }
     in
-      N { p = valOf FixedInt.maxInt, v = ref [], a = A.array (MAX, tl)
+      N { p = valOf FixedInt.maxInt, v = ref [], a = A.array (maxLevel, tl)
         , m = M.mutex (), c = C.conditionVar (), w = ref 0w0
         }
     end
@@ -165,19 +168,19 @@ struct
   end
 
   local
-    val wpos = 0w32
-    val wcnt = ((0w1 << 0w64) - 0w1) << wpos
+    val wpos = Word.fromInt (Word.wordSize - (usedBits - fullLock))
     val wlm = (0w1 << wpos) - 0w1
   in
     fun getb w = w `& wlm
-    fun getc w = (w `& wcnt) >> wpos
+    fun getc w = w >> wpos
+    (* overflow warning: callers must check for w > 0 or w < maxItems *)
     fun incr w = ((getc w + 0w1) << wpos) + getb w
     fun decr w = ((getc w - 0w1) << wpos) + getb w
 
     fun setDel (N { w, m, ... }) =
-      if !w `& wcnt = 0w0 then
+      if !w >> wpos = 0w0 then
         false
-      else if (M.lock m; !w `& wcnt = 0w0) then
+      else if (M.lock m; !w >> wpos = 0w0) then
         (M.unlock m; false)
       else
         (w := decr (!w); M.unlock m; true)
@@ -229,7 +232,7 @@ struct
   in
     fun preds (n, xp) =
       let
-        val b = A.array (MAX, n)
+        val b = A.array (maxLevel, n)
         fun f (~1, n1, _) = n1
           | f (i, n1, n2) =
               let
@@ -239,7 +242,7 @@ struct
                 f (i - 1, n1, n2)
               end
       in
-        (b, f (MAX - 1, n, n))
+        (b, f (maxLevel - 1, n, n))
       end
   end
 
@@ -264,9 +267,9 @@ struct
             f (i + 1)
           end
     in
-      lock (n', INS);
+      lock (n', fullLock);
       f 0;
-      unlock (n', INS)
+      unlock (n', fullLock)
     end
 
   fun enq (hd, (xp, xv)) =
@@ -278,7 +281,7 @@ struct
         let
           val w' = (M.lock m; getc (!w))
         in
-          if w' = 0w0 orelse w' = LIM then
+          if w' = 0w0 orelse w' = maxItems then
             let
               val _ = M.unlock m
               val n' =
@@ -335,7 +338,7 @@ struct
   in
     fun preds (n, xp, xv) =
       let
-        val b = A.array (MAX, n)
+        val b = A.array (maxLevel, n)
         fun f (~1, n1, _) = n1
           | f (i, n1, n2) =
               let
@@ -345,7 +348,7 @@ struct
                 f (i - 1, n1, n2)
               end
       in
-        (b, f (MAX - 1, n, n))
+        (b, f (maxLevel - 1, n, n))
       end
   end
 
@@ -373,9 +376,9 @@ struct
               f (i - 1)
             end
     in
-      lock (n, INS);
+      lock (n, fullLock);
       f (A.length a - 1);
-      unlock (n, INS)
+      unlock (n, fullLock)
     end
 
   fun deq hd =
