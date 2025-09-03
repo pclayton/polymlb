@@ -95,7 +95,7 @@ struct
     fun ctz 0w0 = 0w0
       | ctz w = popcnt ((w `& ~w) - 0w1)
 
-    fun rotl (w, d) = (w << d) `| (w >> (0w64 - d))
+    fun rotl (w, d) = (w << d) `| (w >> (0w63 - d))
 
     fun next (s0, s1) =
      let
