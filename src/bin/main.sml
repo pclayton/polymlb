@@ -333,8 +333,6 @@ local
     in
       l
     end
-
-  fun err _ = ()
 in
   fun doCompile (opts as { file, ... } : opts) =
     P.compile (o2o opts) file handle _ => (die ""; raise Fail "")
