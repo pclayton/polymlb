@@ -157,9 +157,15 @@ local
           xs before f () before TIO.closeIn s
         end
 
-  fun ann (_, _, s) [] = req s
-    | ann (field, b, s) (x::xs) =
-        case (if b then P.Ann.parse else P.Ann.parseName) x of
+  fun ann (_, s) [] = req s
+    | ann (field, s) (x::xs) =
+        case P.Ann.parse x of
+          P.Ann.Ann a => xs before field d := a :: !(field d)
+        | _ => inv (s, x)
+
+  fun annName (_, s) [] = req s
+    | annName (field, s) (x::xs) =
+        case P.Ann.parseName x of
           NONE => inv (s, x)
         | SOME a => xs before field d := a :: !(field d)
 
@@ -179,11 +185,11 @@ in
             ( l := xs
             ; case x of
                 "--" => ((#file d := hd xs) handle Empty => usage ())
-              | "-ann" => l := ann (#rootAnns, true, "-ann") xs
+              | "-ann" => l := ann (#rootAnns, "-ann") xs
               | "-c" => #cmd d := Compile
-              | "-default-ann" => l := ann (#defAnns, true, "default-ann") xs
+              | "-default-ann" => l := ann (#defAnns, "default-ann") xs
               | "-deps-first" => #depsf d := true
-              | "-disable-ann" => l := ann (#disAnns, false, "disable-ann") xs
+              | "-disable-ann" => l := annName (#disAnns, "disable-ann") xs
               | "-h" => help ()
               | "-help" => help ()
               | "-info" => info ()

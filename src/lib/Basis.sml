@@ -154,11 +154,17 @@ struct
       ([], []) l)
 
   fun badAnn NONE _ = ()
-    | badAnn (SOME { pathFmt, print }) (a, loc) =
+    | badAnn (SOME { pathFmt, print }) (loc, a, r) =
         print
           ( Log.Warn
           , fn () => S.concat
-              [Log.locFmt pathFmt loc, ": unrecognized annotation '", a, "'"]
+              (Log.locFmt pathFmt loc :: ": " ::
+                (case r of
+                  Ann.BadArg z => ["bad argument '", z, "' for ann '", a, "'"]
+                | Ann.MissingArg => ["missing argument for ann '", a, "'"]
+                | Ann.UnexpectedArg => ["unexpected arg for ann '", a, "'"]
+                | Ann.Unrecognized => ["unrecognized ann '", a, "'"]
+                | Ann.Ann _ => raise Fail "Basis.badAnn: impossible"))
           )
 
   fun annCheck (xs, dis, cb, loc) =
@@ -166,14 +172,14 @@ struct
       fun f ([], r, p) = (L.rev r, p)
         | f (x::xs, r, p) =
             case Ann.parse x of
-              NONE => (cb (x, loc); f (xs, r, p))
-            | SOME a =>
+              Ann.Ann a =>
                 if Ann.exists a dis then
                   f (xs, r, p)
                 else
-                  case a of
+                  (case a of
                     Ann.IgnoreFiles l => f (xs, a::r, l @ p)
-                  | _ => f (xs, a::r, p)
+                  | _ => f (xs, a::r, p))
+            | z => (cb (loc, x, z); f (xs, r, p))
     in
       f (xs, [], [])
     end

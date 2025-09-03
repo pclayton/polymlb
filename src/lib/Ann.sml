@@ -10,10 +10,17 @@ sig
     (* Open the global namespace; only recognised if prefixed with `poly:` *)
   | ImportAll
 
+  datatype res =
+    Ann of t
+  | BadArg of string
+  | MissingArg
+  | UnexpectedArg
+  | Unrecognized
+
   (* will match regardless of the value *)
   val exists : t -> t list -> bool
 
-  val parse : string -> t option
+  val parse : string -> res
 
   val parseName : string -> t option
 end =
@@ -27,6 +34,13 @@ struct
   | Discard
   | IgnoreFiles of string list
   | ImportAll
+
+  datatype res =
+    Ann of t
+  | BadArg of string
+  | MissingArg
+  | UnexpectedArg
+  | Unrecognized
 
   fun chk (Debug _) (Debug _) = true
     | chk Discard Discard = true
@@ -48,34 +62,43 @@ struct
         (SS.string p, (SS.string o SS.triml 1) a)
     end
 
-  fun ann (_, "debug", SOME v) = O.map Debug (Bool.fromString v)
-    | ann (_, "debug", _) = SOME (Debug false)
-    | ann (_, "discard", SOME "") = SOME Discard
-    | ann (_, "discard", _) = SOME Discard
-    | ann (_, "ignoreFiles", SOME v) =
-        ( O.map IgnoreFiles
-        o O.filter (not o List.null)
-        o S.tokens (fn c => c = #",")
-        ) v
-    | ann (_, "ignoreFiles", _) = SOME (IgnoreFiles [])
-    | ann (true, "importAll", SOME "") = SOME ImportAll
-    | ann (true, "importAll", _) = SOME ImportAll
-    | ann _ = NONE
+  fun arg v =
+    let
+      val v = SS.string (trimWS v)
+    in
+      if size v = 0 then NONE else SOME v
+    end
 
   fun parse s =
     let
       val (a, v) =
         SS.splitl (not o Char.isSpace) ((trimWS o SS.full) s)
+      val (p, a) = prefix a
+      val v = arg v
     in
-      case prefix a of
-        ("", a) => ann (false, a, (SOME o SS.string o trimWS) v)
-      | ("poly", a) => ann (true, a, (SOME o SS.string o trimWS) v)
-      | _ => NONE
+      if size p > 0 andalso p <> "poly" then
+        Unrecognized
+      else if (p, a, v) = ("poly", "importAll", NONE) then
+        Ann ImportAll
+      else
+        case (a, v) of
+          ("debug", NONE) => Ann (Debug true)
+        | ("debug", SOME v) =>
+            (case Bool.fromString v of SOME b => Ann (Debug b) | _ => BadArg v)
+        | ("discard", NONE) => Ann Discard
+        | ("discard", _) => UnexpectedArg
+        | ("ignoreFiles", v) =>
+            (case O.map (S.tokens (fn c => c = #",")) v of
+              SOME [] => MissingArg
+            | SOME l => Ann (IgnoreFiles l)
+            | _ => MissingArg)
+        | _ => Unrecognized
     end
 
   fun parseName s =
-    case prefix (SS.full s) of
-      ("", a) => ann (false, a, NONE)
-    | ("poly", a) => ann (true, a, NONE)
+    case s of
+      "debug" => SOME (Debug true)
+    | "discard" => SOME Discard
+    | "ignoreFiles" => SOME (IgnoreFiles [])
     | _ => NONE
 end
