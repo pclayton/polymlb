@@ -72,6 +72,31 @@ assert
 eq
   [];
 
+"Basis.fromParse inlines public declarations in case of empty local"
+assert
+  fromParse
+    [ (P.Local ([], [(P.File "foo.sml", loc), (P.File "bar.sml", loc)]), loc)
+    , (P.File "baz.sml", loc)
+    ]
+eq
+  [B.SourceFile "/foo.sml", B.SourceFile "/bar.sml", B.SourceFile "/baz.sml"];
+
+"Basis.fromParse removes empty local/in"
+assert
+  fromParse
+    [(P.File "foo.sml", loc), (P.Local ([], []), loc), (P.File "bar.sml", loc)]
+eq
+  [B.SourceFile "/foo.sml", B.SourceFile "/bar.sml"];
+
+"Basis.fromParse inlines expression part in case of empty let"
+assert
+  fromParse
+    [ (P.Basis [("b", (P.Let ([], (P.Id "foo", loc)), loc))], loc)
+    , (P.File "bar.sml", loc)
+    ]
+eq
+  [B.Basis ("b", B.Id "foo"), B.SourceFile "/bar.sml"];
+
 "Basis.fromParse removes files matching an enclosing IgnoreFiles"
 assert
   fromParse

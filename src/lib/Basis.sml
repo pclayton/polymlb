@@ -57,7 +57,10 @@ sig
    * - paths are resolved and validated (variables and extensions);
    * - duplicate binds are checked;
    * - operation lists are inlined, e.g `open bas1 bas2` or
-   *   `structure S1 = S2 and S3 = S4` become two disctint declarations
+   *   `structure S1 = S2 and S3 = S4` become two disctint declarations;
+   * - completely empty local/in ([], []) are discard;
+   * - public declarations of a local/in with empty local are inlined;
+   * - the expression of a let/in with an empty let is inlined.
    *)
   val fromParse : opts -> Parse.t -> t
 end =
@@ -206,7 +209,10 @@ struct
                     else
                       Ann (l, conv (p @ ignored) ds') :: ds)
             | dec ((P.Local (ds1, ds2), _), ds) =
-                Local (conv ignored ds1, conv ignored ds2) :: ds
+                (case (conv ignored ds1, conv ignored ds2) of
+                  ([], []) => ds
+                | ([], l2) => L.revAppend (l2, ds)
+                | (l1, l2) => Local (l1, l2) :: ds)
             | dec ((P.Open l, _), ds) =
                 foldl (fn (s, l) => Open s :: l) [] l @ ds
             | dec ((P.Structure l, loc), ds) =
@@ -221,7 +227,9 @@ struct
             | exp (P.Id s, _) =
                 Id s
             | exp (P.Let (ds, e), _) =
-                Let (conv ignored ds, exp e)
+                case conv ignored ds of
+                  [] => exp e
+                | l => Let (l, exp e)
         in
           L.rev (L.foldl dec [] ds)
         end
