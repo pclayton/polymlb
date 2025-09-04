@@ -30,7 +30,7 @@ sig
   type opts =
     { disabledAnns : Ann.t list
     (* for SML source files only, replaces default.
-     * ["sml", "ml", "sig", "fun"]
+     * ["sml", "ml", "ML", "sig", "fun"]
      *)
     , exts         : string list option
     , logger       : Log.logger option
@@ -116,14 +116,14 @@ struct
   datatype FileType = MLB | SML
 
   local
-    val base_exts = ["sml", "ml", "fun", "sig"]
+    val baseExts = ["sml", "ml", "ML", "fun", "sig"]
   in
     fun ftype (s, exts, loc) =
       case OS.Path.ext s of
         NONE => raise Validation (Extension, s, loc)
       | SOME "mlb" => MLB
       | SOME e =>
-          if L.exists (fn e' => e' = e) (getOpt (exts, base_exts)) then
+          if L.exists (fn e' => e' = e) (getOpt (exts, baseExts)) then
             SML
           else
             raise Validation (Extension, s, loc)
