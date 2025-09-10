@@ -331,7 +331,7 @@ local
               let
                 val anns = defAnns @ rootAnns
               in
-                if null anns then bas else [P.Basis.Ann (defAnns @ anns, bas)]
+                if null anns then bas else [P.Basis.Ann (anns, bas)]
               end
             | { bas, ... } =>
               if null defAnns then bas else [P.Basis.Ann (defAnns, bas)])
