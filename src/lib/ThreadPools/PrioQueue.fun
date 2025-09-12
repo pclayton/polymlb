@@ -54,83 +54,75 @@ struct
       , w : Word.word ref
       }
 
-  val `& = Word.andb
-  val `| = Word.orb
-  val `^ = Word.xorb
-  val << = Word.<<
-  val >> = Word.>>
-  val `~ = Word.notb (* /!\ *)
-  val  ~ = Word.~    (* /!\ *)
-
   infix 8 `& `| `^ << >>
 
   val usedBits = 31
   val maxLevel = 8
   val fullLock = maxLevel + 1
-  val maxItems = 0w1 << Word.fromInt (usedBits - fullLock) - 0w1
+  val maxItems = Word.<< (0w1, Word.fromInt (usedBits - fullLock)) - 0w1
 
   (* Threadsafe biased RNG, 1/2 distribution from 1 to maxLevel.
    *
-   * The generator used is xoroshiro128++, initially seeded with splitmix64;
-   * generator state is thread local. Rather than the `while (rng () < 0.5) i++`
-   * in Pugh's paper, we generate 63 bits once and keep only the low maxLevel
-   * bits, discarding the rest.
+   * The generator used is pcg16; generator state is thread local. Rather than
+   * the `while (rng () < 0.5) i++` in Pugh's paper, we generate 16 bits once
+   * and keep only the low maxLevel bits, discarding the rest.
    *
    * see:
-   *   https://prng.di.unimi.it/
-   *   https://prng.di.unimi.it/xoroshiro128plusplus.c
-   *   https://xorshift.di.unimi.it/splitmix64.c
+   *   http://www.pcg-random.org
+   *   https://github.com/imneme/pcg-c
    *)
   local
-    val t : (Word.word ref * Word.word ref) Universal.tag = Universal.tag ()
     structure T = Thread.Thread
 
-    (* https://www.chessprogramming.org/Population_Count#The_PopCount_routine *)
-    fun popcnt w =
+    val op<< = Word16.<<
+    val op>> = Word16.>>
+    val op`& = Word16.andb
+    val op`^ = Word16.xorb
+    val    ~ = Word16.~
+
+    val mask = (0w1 << Word.fromInt maxLevel) - 0w1
+    val t : Word16.word ref Universal.tag = Universal.tag ()
+
+    local
+      (* https://www.chessprogramming.org/Population_Count#The_PopCount_routine *)
+      fun popcnt w =
+        let
+          val w = w - ((w >> 0w1) `& 0wx5555)
+          val w = (w `& 0wx3333) + ((w >> 0w2) `& 0wx3333)
+        in
+          (((w + (w >> 0w4)) `& 0wxF0F) * 0wx101) >> 0w8
+        end
+
+      (* https://www.chessprogramming.org/BitScan#Index_of_LS1B_by_Popcount *)
+      fun ctz 0w0 = 0w0
+        | ctz w = popcnt ((w `& ~w) - 0w1)
+
+      (* Since the output size is 8 bits, i.e 256 possible values, we simply use
+       * a lookup table for ctz.
+       *)
+      val counts = Word8Vector.tabulate
+        ( Word16.toInt mask + 1
+        , Word8.fromLarge o Word16.toLarge o ctz o Word16.fromInt
+        )
+    in
+      fun biased w = Word8Vector.sub (counts, Word16.toInt w)
+    end
+
+    val tow = Word.fromLarge o Word16.toLarge
+
+    (* pcg_oneseq_16_rxs_m_xs_16_random_r *)
+    fun next (r as ref w) =
       let
-        val w = w - ((w >> 0w1) `& 0wx5555555555555555)
-        val w = (w `& 0wx3333333333333333) + ((w >> 0w2) `& 0wx3333333333333333)
+        (* pcg_oneseq_16_step_r *)
+        val _ = r := w * 0w12829 + 0w47989
+        (* pcg_output_rxs_m_xs_16_16 *)
+        val w = ((w >> tow ((w >> 0w13) + 0w3)) `^ w) * 0w62169
       in
-        (((w + (w >> 0w4)) `& 0wxF0F0F0F0F0F0F0F) * 0wx101010101010101) >> 0w56
-      end
-
-    (* https://www.chessprogramming.org/BitScan#Index_of_LS1B_by_Popcount *)
-    fun ctz 0w0 = 0w0
-      | ctz w = popcnt ((w `& ~w) - 0w1)
-
-    fun rotl (w, d) = (w << d) `| (w >> (0w63 - d))
-
-    fun next (s0, s1) =
-     let
-        val w0 = !s0
-        val w1 = !s1
-        val r = rotl (w0 + w1, 0w17) + w0
-        val w1 = w1 `^ w0
-      in
-        s0 := rotl (w0, 0w49) `^ w1 `^ (w1 << 0w21);
-        s1 := rotl (w1, 0w28);
-        r
-      end
-
-    (* Adjusted constants to avoid overflows *)
-    fun sm64 w =
-      let
-        val _ = w := !w + 0wx4F1BBCDCBFA53E0B
-        val w = !w
-        val w = (w `^ (w >> 0w30)) * 0wx5FAC23B68E7272DD
-        val w = (w `^ (w >> 0w27)) * 0wx4A6824DD899888F5
-      in
-        w `^ (w >> 0w31)
+        (w >> 0w11) `^ w
       end
 
     fun new () =
-      let
-        val s = (ref o Word.fromLargeInt o Time.toMicroseconds o Time.now) ()
-      in
-        (ref (sm64 s), ref (sm64 s))
-      end
-
-    val mask = (0w1 << Word.fromInt maxLevel) - 0w1
+      (ref o Word16.fromInt o Int.fromLarge o Time.toMicroseconds o Time.now) ()
   in
     fun rand () =
       let
@@ -139,9 +131,17 @@ struct
             SOME r => r
           | NONE => let val r = new () in T.setLocal (t, r); r end
       in
-        (Word.toInt o ctz) (next r `& mask) + 1
+        (Word8.toInt o biased) (next r `& mask) + 1
       end
   end
+
+  val op`& = Word.andb
+  val op`| = Word.orb
+  val op`^ = Word.xorb
+  val op<< = Word.<<
+  val op>> = Word.>>
+  val   `~ = Word.notb (* /!\ *)
+  val    ~ = Word.~    (* /!\ *)
 
   fun new () : t =
     let
