@@ -192,7 +192,7 @@ struct
                     ( case log of
                         NONE => ()
                       | SOME { pathFmt, print } =>
-                          print (Log.Debug, fn () => "compiling " ^ pathFmt p)
+                          print (Log.Trace, fn () => "compiling " ^ pathFmt p)
                     ; compileSML log (pns, p, opts)
                     ; dec ds
                     )
