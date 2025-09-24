@@ -1,3 +1,20 @@
+diff --git a/Makefile b/Makefile
+index 7433195..5087cb5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -29,10 +29,10 @@ src/version~: force
+ 	@echo '$(GIT_VERSION) $(GIT_DATE)' | cmp -s - $@ || echo '$(GIT_VERSION) $(GIT_DATE)' > $@
+ 
+ src/version.sml: src/version~
+-	@echo "structure Version = struct\n\
++	@printf "structure Version = struct\n\
+    val version = \"$(GIT_VERSION)\"\n\
+    val date = \"$(GIT_DATE)\"\n\
+-   val platform = \"$(PLATFORM)\"\nend" > $@
++   val platform = \"$(PLATFORM)\"\nend\n" > $@
+ 	@echo Generated file $@
+ 	@echo Git version $(GIT_VERSION) $(GIT_DATE)
+ 
 diff --git a/src/aplt.sml b/src/aplt.sml
 index 2a7db7f..4ac39ca 100644
 --- a/src/aplt.sml
