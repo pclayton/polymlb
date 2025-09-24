@@ -38,6 +38,8 @@ z=$(awk -F '=' "$prog" < "$file")
 ver="$(echo "$z" | tail -1)"
 echo "$(echo "$z" | head -n -1)" > "$file"
 
+sed -i "1s/.*/.Dd $(date "+%B %d, %Y")/" polymlb.1
+
 git commit -am "v$ver" || { echo "could not commit" && exit 1; }
 
 if git tag -a -m "release v$ver" "v$ver"; then
