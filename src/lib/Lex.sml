@@ -75,7 +75,9 @@ struct
 
   fun toString t =
     case t of
-      String s => "string \"" ^ s ^ "\""
+      String "" => "string"
+    | String s => "string \"" ^ s ^ "\""
+    | Symbol "" => "symbol"
     | Symbol s => "symbol \"" ^ s ^ "\""
     | And => "and"
     | Ann => "ann"
