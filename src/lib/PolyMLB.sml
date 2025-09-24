@@ -140,17 +140,15 @@ struct
       o Dag.process { logger = logger, reduce = true } mkBas
       ) src
       handle e =>
-        ( case logger of
-            SOME { pathFmt, print } =>
-              print (Log.Error,
-                fn () => case e of
-                    Lex.Lex z          => Lex.errToString pathFmt z
-                  | Parse.Parse z      => Parse.errToString pathFmt z
-                  | Basis.Validation z => Basis.errToString pathFmt z
-                  | Dag.Dag z          => Dag.errToString pathFmt z
-                  | Compile.Compile z  => Compile.errToString pathFmt z
-                  | _                  => exnMessage e)
-          | _ => ()
+        ( Log.log logger Log.Error
+            (fn fmt =>
+               case e of
+                Lex.Lex z          => Lex.errToString     fmt z
+              | Parse.Parse z      => Parse.errToString   fmt z
+              | Basis.Validation z => Basis.errToString   fmt z
+              | Dag.Dag z          => Dag.errToString     fmt z
+              | Compile.Compile z  => Compile.errToString fmt z
+              | _                  => exnMessage e)
         ; PolyML.Exception.reraise e
         )
     end

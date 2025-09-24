@@ -409,25 +409,20 @@ struct
 
   fun process { logger, reduce = red } f s =
     let
-      val (log, parse) =
-        case logger of
-          NONE => (fn _ => (), f)
-        | SOME { pathFmt, print } =>
-            ( fn m => print (Log.Debug, fn () => m)
-            , fn s => (print (Log.Debug, fn () => "parsing " ^ pathFmt s); f s)
-            )
+      val log = Log.log logger Log.Debug
+      fun parse s = (log (fn fmt => "parsing " ^ fmt s); f s)
 
       val { bases, paths, ids, deps, revs } =
-        (log "traversing MLB graph"; traverse (parse, s))
+        (log (fn _ => "traversing MLB graph"); traverse (parse, s))
       val bs = { sz = V.length bases, deps = deps, revs = revs }
-      val full = (log "building MLBgraph"; mkDag bs)
+      val full = (log (fn _ => "building MLBgraph"); mkDag bs)
       val dag =
         if not red then
           full
         else
-          ( log "reducing MLB graph"
+          ( log (fn _ => "reducing MLB graph")
           ; reduce bs
-          ; log "building reduced MLB graph"
+          ; log (fn _ => "building reduced MLB graph")
           ; mkDag bs
           )
     in

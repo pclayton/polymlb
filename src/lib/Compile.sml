@@ -30,7 +30,7 @@ struct
   structure D    = Dag
   structure FTP  = ThreadPools.FTP
   structure H    = HashArray
-  structure L    = List
+  structure L    = Log
   structure M    = Thread.Mutex
   structure NS   = NameSpace
   structure P    = PolyML
@@ -83,19 +83,14 @@ struct
           ; loc := location
           )
         else
-          case log of
-            NONE => ()
-          | SOME { pathFmt, print } =>
+          L.log log L.Warn
+            (fn fmt =>
               let
                 val m = ref ([] : string list)
               in
                 P.prettyPrint (fn s => m := s :: !m, 80) message;
-                print
-                  ( Log.Warn
-                  , fn () => String.concat
-                      (Log.locFmt pathFmt location :: ": " :: List.rev (!m))
-                  )
-              end
+                concat (L.locFmt fmt location :: ": " :: rev (!m))
+              end)
 
       val s = (ref o TIO.getInstream o TIO.openIn) path
       val l = ref 1
@@ -189,10 +184,7 @@ struct
                   if isIgnored (ign, p) then
                     dec ds
                   else
-                    ( case log of
-                        NONE => ()
-                      | SOME { pathFmt, print } =>
-                          print (Log.Trace, fn () => "compiling " ^ pathFmt p)
+                    ( L.log log L.Trace (fn fmt => "compiling " ^ fmt p)
                     ; compileSML log (pns, p, opts)
                     ; dec ds
                     )
@@ -334,9 +326,7 @@ struct
 
   structure NSA = NameSpaceArray
 
-  fun logElab NONE _ = ()
-    | logElab (SOME { pathFmt, print }) p =
-        print (Log.Info, fn () => "elaborating " ^ pathFmt p)
+  fun logElab log p = L.log log L.Info (fn fmt => "elaborating " ^ fmt p)
 
   (* Driver functions. *)
 

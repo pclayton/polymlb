@@ -2,9 +2,12 @@ structure Log :>
 sig
   datatype level = Trace | Debug | Info | Warn | Error
   type event = level * (unit -> string)
-  type logger = { pathFmt : string -> string, print : event -> unit }
+  type pathFmt = string -> string
+  type logger = { pathFmt : pathFmt, print : event -> unit }
 
-  val locFmt : (string -> string) -> PolyML.location -> string
+  val log : logger option -> level -> (pathFmt -> string) -> unit
+
+  val locFmt : pathFmt -> PolyML.location -> string
 
   val levelToInt : level -> int
   val levelFromInt : int -> level
@@ -12,7 +15,11 @@ end =
 struct
   datatype level = Trace | Debug | Info | Warn | Error
   type event = level * (unit -> string)
-  type logger = { pathFmt : string -> string, print : event -> unit }
+  type pathFmt = string -> string
+  type logger = { pathFmt : pathFmt, print : event -> unit }
+
+  fun log NONE _ _ = ()
+    | log (SOME { pathFmt, print }) l f = print (l, fn () => f pathFmt)
 
   val int = Int.toString
 

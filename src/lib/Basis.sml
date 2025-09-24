@@ -156,19 +156,15 @@ struct
           (x1::xs, f (x1, x2) :: r))
       ([], []) l)
 
-  fun badAnn NONE _ = ()
-    | badAnn (SOME { pathFmt, print }) (loc, a, r) =
-        print
-          ( Log.Warn
-          , fn () => S.concat
-              (Log.locFmt pathFmt loc :: ": " ::
-                (case r of
-                  Ann.BadArg z => ["bad argument '", z, "' for ann '", a, "'"]
-                | Ann.MissingArg => ["missing argument for ann '", a, "'"]
-                | Ann.UnexpectedArg => ["unexpected arg for ann '", a, "'"]
-                | Ann.Unrecognized => ["unrecognized ann '", a, "'"]
-                | Ann.Ann _ => raise Fail "Basis.badAnn: impossible"))
-          )
+  fun badAnn log (loc, a, r) = Log.log log Log.Warn
+    (fn fmt => concat
+      (Log.locFmt fmt loc :: ": " ::
+        (case r of
+          Ann.BadArg z => ["bad argument '", z, "' for ann '", a, "'"]
+        | Ann.MissingArg => ["missing argument for ann '", a, "'"]
+        | Ann.UnexpectedArg => ["unexpected arg for ann '", a, "'"]
+        | Ann.Unrecognized => ["unrecognized ann '", a, "'"]
+        | Ann.Ann _ => raise Fail "Basis.badAnn: impossible")))
 
   fun annCheck (xs, dis, cb, loc) =
     let
