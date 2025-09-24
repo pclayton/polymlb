@@ -92,26 +92,25 @@ struct
     | Signature => "signature"
     | Structure => "structure"
 
-  (* Positions are packed in a single 63 bit word, where each line or column is
-   * represented with 15 bit. This assumes that {files,columns} are no longer
-   * than 32768 {lines,characters}. The storing order is [start line, start col,
+  (* Positions are packed in a single 64 bit word, where each line or column is
+   * represented with 16 bit. This assumes that {files,columns} are no longer
+   * than 65536 {lines,characters}. The storing order is [start line, start col,
    * end line, end col], from the msb to the lsb.
    *)
-  type position = word
+  type position = Word64.word
 
   local
-    val `& = Word.andb
-    val `| = Word.orb
-    val << = Word.<<
-    val >> = Word.>>
+    val `& = Word64.andb
+    val `| = Word64.orb
+    val << = Word64.<<
+    val >> = Word64.>>
 
     infix 8 `& `| `^ << >>
 
-    val toi = Word.toInt
-    val tow = Word.fromInt
+    val toi = Word64.toInt
+    val tow = Word64.fromInt
 
-
-    val max = toi (0w1 << 0w15)
+    val max = toi (0w1 << 0w16)
 
     fun chkdw i =
       if i >= max then
@@ -119,22 +118,23 @@ struct
       else
         tow i
 
-    val slineMask = (0w1 << 0w15 - 0w1) << 0w48
-    val scolMask  = (0w1 << 0w15 - 0w1) << 0w32
-    val elineMask = (0w1 << 0w15 - 0w1) << 0w16
-    val ecolMask  =  0w1 << 0w15 - 0w1
+    val slineMask = (0w1 << 0w16 - 0w1) << 0w48
+    val scolMask  = (0w1 << 0w16 - 0w1) << 0w32
+    val elineMask = (0w1 << 0w16 - 0w1) << 0w16
+    val ecolMask  =  0w1 << 0w16 - 0w1
 
-    val sMask = (0w1 << 0w31 - 0w1) << 0w32
+    val sMask = (0w1 << 0w32 - 0w1) << 0w32
     val eMask =  0w1 << 0w32 - 0w1
   in
     fun mkPos (l, c, l', c') =
       (chkdw l << 0w48) `| (chkdw c << 0w32) `| (chkdw l' << 0w16) `| chkdw c'
 
     fun joinPos (w1, w2) =
-      Word.min (w1 `& sMask, w2 `& sMask) `| Word.max (w1 `& eMask, w2 `& eMask)
+         Word64.min (w1 `& sMask, w2 `& sMask)
+      `| Word64.max (w1 `& eMask, w2 `& eMask)
 
     fun unpackStart w =
-      (toi ((w `& slineMask) >> 0w48), toi ((w `& scolMask)  >> 0w32))
+      (toi ((w `& slineMask) >> 0w48), toi ((w `& scolMask) >> 0w32))
 
     fun toPolyLoc (s, w) =
       { file = s
