@@ -1,0 +1,7 @@
+ann
+  "poly:importAll"
+in
+  signature THREAD
+  structure Thread
+  structure ThreadLib
+end

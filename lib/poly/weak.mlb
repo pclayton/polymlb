@@ -1,0 +1,6 @@
+ann
+  "poly:importAll"
+in
+  signature WEAK
+  structure Weak
+end

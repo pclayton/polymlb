@@ -1,0 +1,7 @@
+ann
+  "poly:importAll"
+in
+  structure Net6HostDB
+  signature INET6_SOCK
+  structure INet6Sock
+end

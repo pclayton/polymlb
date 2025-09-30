@@ -1,0 +1,6 @@
+ann
+  "poly:importAll"
+in
+  (* signature FOREIGN *)
+  structure Foreign
+end

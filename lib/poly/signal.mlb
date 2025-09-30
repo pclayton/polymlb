@@ -1,0 +1,6 @@
+ann
+  "poly:importAll"
+in
+  signature SIGNAL
+  structure Signal
+end

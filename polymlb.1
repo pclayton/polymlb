@@ -137,13 +137,38 @@ elaborated when aborting, these are only stopped when they reach a break
 point, which is before processing any MLB declaration. Errors that happen
 after the one that caused elaboration to abort are discarded.
 .Ss LIBRARIES
-The following libraries are available:
-.Bl -tag -width "$(SML_LIB)/polymlb/polymlb.mlb" -offset indent -compact
-.It Pa $(SML_LIB)/basis/basis.mlb
+The following libraries are available under
+.Pa $(SML_LIB) :
+.Bl -tag -width "poly/single-assignment.mlb" -offset indent -compact
+.It Pa basis/basis.mlb
 Standard ML Basis library
-.It Pa $(SML_LIB)/basis/poly.mlb
-Poly/ML library extensions
-.It Pa $(SML_LIB)/polymlb/polymlb.mlb
+.It Pa basis/poly.mlb
+All Poly/ML library extensions
+.It Pa poly/asn1.mlb
+Asn1 :> ASN1
+.It Pa poly/foreign.mlb
+Foreign :> FOREIGN
+.It Pa poly/hash-array.mlb
+HashArray
+.It Pa poly/net6.mlb
+Net6HostDB, INet6Sock :> INET6_SOCK
+.It Pa poly/polyml.mlb
+PolyML
+.It Pa poly/runcall.mlb
+RunCall
+.It Pa poly/signal.mlb
+Signal :> SIGNAL
+.It Pa poly/single-assignment.mlb
+SingleAssignment
+.It Pa poly/sml90.mlb
+SML90
+.It Pa poly/thread.mlb
+Thread :> THREAD, ThreadLib
+.It Pa poly/universal.mlb
+Universal, UniversalArray
+.It Pa poly/weak.mlb
+Weak :> WEAK
+.It Pa polymlb/polymlb.mlb
 PolyMLB library
 .Ss ANNOTATIONS
 The following annotations are recognized, with an optional
