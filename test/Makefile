@@ -18,7 +18,8 @@ repos: $(REPOS)
 $(REPOS):
 	@ [ -d "$(REPOS_DIR)/$(@F:.t=)" ] || { \
 		. $@ && \
-		git clone --depth=1 --revision=$$sha $$url $(REPOS_DIR)/$(@F:.t=) && \
+		git clone -c advice.detachedHead=false --depth=1 --revision=$$sha \
+			$$url $(REPOS_DIR)/$(@F:.t=) && \
 		cd $(REPOS_DIR)/$(@F:.t=) && \
 		smlpkg sync && \
 		git apply ../../$(@F:.t=.patch); \
